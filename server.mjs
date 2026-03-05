@@ -160,6 +160,74 @@ const MIME = {
   ".webmanifest": "application/manifest+json",
 };
 const SWAP_ORDERS = new Map();
+const LI_FI_BASE_URL = "https://li.quest/v1";
+const DEBRIDGE_BASE_URL = "https://dln.debridge.finance";
+const DEBRIDGE_STATUS_BASE_URL = "https://stats-api.dln.trade/api/Orders";
+const ACROSS_BASE_URL = "https://app.across.to/api";
+const EVM_CHAIN_IDS = {
+  ethereum: 1,
+  bsc: 56,
+  polygon: 137,
+  arbitrum: 42161,
+  optimism: 10,
+  base: 8453,
+  avalanche: 43114,
+  fantom: 250,
+  zksync: 324,
+  linea: 59144,
+};
+const LI_FI_CHAIN_IDS = {
+  ...EVM_CHAIN_IDS,
+  solana: 1151111081099710,
+};
+const TOKEN_META = {
+  ethereum: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDT: { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", decimals: 6 },
+    USDC: { address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6 },
+  },
+  bsc: {
+    BNB: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDT: { address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18 },
+    USDC: { address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", decimals: 18 },
+  },
+  polygon: {
+    MATIC: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDT: { address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6 },
+    USDC: { address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", decimals: 6 },
+  },
+  arbitrum: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDT: { address: "0xFd086bC7CD5C481DCC9C85ebe478A1C0b69FCbb9", decimals: 6 },
+    USDC: { address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals: 6 },
+  },
+  optimism: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDT: { address: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58", decimals: 6 },
+    USDC: { address: "0x0b2C639c533813f4Aa9D7837CaF62653d097Ff85", decimals: 6 },
+  },
+  base: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDT: { address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", decimals: 6 },
+    USDC: { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
+  },
+  avalanche: {
+    AVAX: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDT: { address: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7", decimals: 6 },
+    USDC: { address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", decimals: 6 },
+  },
+  solana: {
+    SOL: { address: "11111111111111111111111111111111", decimals: 9 },
+    USDC: { address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
+  },
+};
+const BRIDGE_KEY_MAP = {
+  across: "across",
+  relay: "relay",
+  jumper: "",
+  mayan: "mayan",
+  debridge: "debridge",
+};
 
 function asNum(v, fallback = 0) {
   const n = Number(v);
@@ -313,80 +381,197 @@ function buildTaxIntent(payload = {}) {
   };
 }
 
-function createSwapOrder(payload = {}) {
+function parseUnitsHuman(value, decimals) {
+  const [wholeRaw, fracRaw = ""] = String(value ?? "0").trim().split(".");
+  const whole = (wholeRaw || "0").replace(/[^\d]/g, "") || "0";
+  const frac = fracRaw.replace(/[^\d]/g, "").slice(0, decimals).padEnd(decimals, "0");
+  return (BigInt(whole) * (10n ** BigInt(decimals)) + BigInt(frac || "0")).toString();
+}
+
+function tokenMeta(chainId, tokenId) {
+  return TOKEN_META[chainId]?.[tokenId] || null;
+}
+
+function lifiChainId(chainId) {
+  return LI_FI_CHAIN_IDS[chainId] || 0;
+}
+
+function evmChainId(chainId) {
+  return EVM_CHAIN_IDS[chainId] || 0;
+}
+
+function bridgeAllowList(providerKey) {
+  const mapped = BRIDGE_KEY_MAP[providerKey] || "";
+  return mapped ? [mapped] : [];
+}
+
+function requireSourceAddress(payload) {
+  const fromAddress = String(payload?.fromAddress || payload?.sourceAddress || payload?.intent?.execution?.sourceAddress || "").trim();
+  if (!fromAddress) throw new Error("Source wallet address is required for real cross-chain execution");
+  return fromAddress;
+}
+
+async function fetchJson(url, options = {}) {
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`${url} failed: ${res.status}${text ? ` ${text.slice(0, 220)}` : ""}`);
+  }
+  return await res.json();
+}
+
+async function prepareLifiSwap(intent, payload) {
+  const fromChainId = lifiChainId(intent.from.chain);
+  const toChainId = lifiChainId(intent.to.chain);
+  if (!fromChainId || !toChainId) {
+    throw new Error(`LI.FI does not support ${intent.from.chain} -> ${intent.to.chain}`);
+  }
+  const fromToken = tokenMeta(intent.from.chain, intent.from.token);
+  const toToken = tokenMeta(intent.to.chain, intent.to.token);
+  if (!fromToken || !toToken) {
+    throw new Error(`LI.FI token mapping missing for ${intent.from.chain}:${intent.from.token} or ${intent.to.chain}:${intent.to.token}`);
+  }
+  const fromAddress = requireSourceAddress(payload);
+  const amountRaw = parseUnitsHuman(intent.execution?.swapAmountAfterTax ?? intent.from.amount, fromToken.decimals);
+  const params = new URLSearchParams({
+    fromChain: String(fromChainId),
+    toChain: String(toChainId),
+    fromToken: fromToken.address,
+    toToken: toToken.address,
+    fromAmount: amountRaw,
+    fromAddress,
+    toAddress: String(intent.to.recipient || "").trim() || fromAddress,
+    slippage: String(Math.max(0.1, Number(payload?.slippage || 0.5))),
+  });
+  const allowed = bridgeAllowList(intent.execution?.providerKey);
+  if (allowed.length) params.set("allowBridges", allowed.join(","));
+  const quote = await fetchJson(`${LI_FI_BASE_URL}/quote?${params.toString()}`);
+  const tx = quote?.transactionRequest;
+  if (!tx?.to) throw new Error("LI.FI quote did not return transactionRequest");
+  return {
+    provider: "LI.FI",
+    providerKey: intent.execution?.providerKey || "jumper",
+    kind: "evm",
+    routeId: quote?.id || quote?.transactionId || "",
+    tx,
+    raw: quote,
+  };
+}
+
+async function prepareAcrossSwap(intent, payload) {
+  const fromChainId = evmChainId(intent.from.chain);
+  const toChainId = evmChainId(intent.to.chain);
+  if (!fromChainId || !toChainId) throw new Error("Across supports only EVM routes");
+  const fromToken = tokenMeta(intent.from.chain, intent.from.token);
+  const toToken = tokenMeta(intent.to.chain, intent.to.token);
+  if (!fromToken || !toToken) throw new Error("Across token mapping missing for selected route");
+  const fromAddress = requireSourceAddress(payload);
+  const amount = parseUnitsHuman(intent.execution?.swapAmountAfterTax ?? intent.from.amount, fromToken.decimals);
+  const params = new URLSearchParams({
+    tradeType: "exactInput",
+    originChainId: String(fromChainId),
+    destinationChainId: String(toChainId),
+    inputToken: fromToken.address,
+    outputToken: toToken.address,
+    amount,
+    depositor: fromAddress,
+    recipient: String(intent.to.recipient || "").trim() || fromAddress,
+  });
+  const quote = await fetchJson(`${ACROSS_BASE_URL}/swap/approval?${params.toString()}`);
+  const swapTx = quote?.swapTx || quote?.swapTxn || null;
+  if (!swapTx?.to) throw new Error("Across did not return executable swap transaction");
+  return {
+    provider: "Across",
+    providerKey: "across",
+    kind: "evm",
+    approvalTxs: Array.isArray(quote?.approvalTxns) ? quote.approvalTxns : [],
+    tx: swapTx,
+    raw: quote,
+  };
+}
+
+async function prepareRealExecution(payload = {}) {
   const incomingIntent = payload?.intent && typeof payload.intent === "object" ? payload.intent : null;
   const intent = incomingIntent || buildTaxIntent(payload);
+  const providerKey = String(intent.execution?.providerKey || "").toLowerCase();
+  if (!providerKey) throw new Error("Missing execution provider");
+  if (providerKey === "across") return { intent, execution: await prepareAcrossSwap(intent, payload) };
+  if (providerKey === "relay" || providerKey === "jumper" || providerKey === "mayan" || providerKey === "debridge") {
+    return { intent, execution: await prepareLifiSwap(intent, payload) };
+  }
+  throw new Error(`Provider ${providerKey} is not wired for real execution yet`);
+}
+
+function createSwapOrder(intent, execution) {
   const orderId = `psx_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const now = new Date().toISOString();
   const order = {
     id: orderId,
-    status: "submitted",
+    status: "awaiting_source_execution",
     createdAt: now,
     updatedAt: now,
     intent,
+    preparedExecution: execution,
     steps: [
-      { key: "tax", status: "pending", note: "Tax transfer pending user signature" },
-      { key: "crosschain", status: "queued", note: "Cross-chain route queued in PepeShibDex engine" },
+      { key: "tax", status: "pending", note: "Tax transfer pending wallet signature" },
+      { key: "crosschain", status: "awaiting_wallet", note: `${execution.provider} source transaction ready for wallet confirmation` },
     ],
   };
   SWAP_ORDERS.set(orderId, order);
   return order;
 }
 
-function hydrateSwapOrder(order) {
-  const createdMs = Date.parse(order.createdAt || new Date().toISOString());
-  const elapsed = Math.max(0, Date.now() - createdMs);
+async function refreshOrderStatus(order) {
+  order.updatedAt = new Date().toISOString();
+  if (!order?.sourceTxHash) return order;
 
-  if (elapsed >= 12000) {
-    order.status = "completed";
-    order.steps = [
-      {
-        key: "tax",
-        status: "completed",
-        note: "Tax transfer confirmed",
-        txHash: `tax_${order.id}`,
-      },
-      {
-        key: "crosschain",
-        status: "completed",
-        note: "Cross-chain execution completed",
-        txHash: `swap_${order.id}`,
-      },
-    ];
-  } else if (elapsed >= 6000) {
-    order.status = "processing";
-    order.steps = [
-      {
-        key: "tax",
-        status: "completed",
-        note: "Tax transfer confirmed",
-        txHash: `tax_${order.id}`,
-      },
-      {
-        key: "crosschain",
-        status: "processing",
-        note: "Waiting bridge settlement",
-      },
-    ];
-  } else if (elapsed >= 2000) {
-    order.status = "processing";
-    order.steps = [
-      {
-        key: "tax",
-        status: "processing",
-        note: "Tax transfer pending confirmation",
-      },
-      {
-        key: "crosschain",
-        status: "queued",
-        note: "Cross-chain route queued in PepeShibDex engine",
-      },
-    ];
-  } else {
-    order.status = "submitted";
+  const providerKey = String(order?.preparedExecution?.providerKey || "").toLowerCase();
+  if (providerKey === "across" || providerKey === "relay" || providerKey === "jumper" || providerKey === "mayan" || providerKey === "debridge") {
+    try {
+      const fromChain = lifiChainId(order.intent?.from?.chain);
+      const toChain = lifiChainId(order.intent?.to?.chain);
+      if (fromChain && toChain) {
+        const statusUrl = `${LI_FI_BASE_URL}/status?txHash=${encodeURIComponent(order.sourceTxHash)}&fromChain=${fromChain}&toChain=${toChain}`;
+        const status = await fetchJson(statusUrl);
+        const bridgeStatus = String(status?.status || "").toLowerCase();
+        if (bridgeStatus === "done") {
+          order.status = "completed";
+          order.steps = [
+            { key: "tax", status: "completed", note: "Tax transfer submitted", txHash: order.taxTxHash || "" },
+            { key: "crosschain", status: "completed", note: "Bridge completed on-chain", txHash: order.sourceTxHash },
+          ];
+          return order;
+        }
+        if (bridgeStatus === "failed") {
+          order.status = "failed";
+          order.steps = [
+            { key: "tax", status: order.taxTxHash ? "completed" : "pending", note: "Tax transfer status stored", txHash: order.taxTxHash || "" },
+            { key: "crosschain", status: "failed", note: status?.substatus || "Provider reported failure", txHash: order.sourceTxHash },
+          ];
+          return order;
+        }
+        order.status = "processing";
+        order.steps = [
+          { key: "tax", status: order.taxTxHash ? "completed" : "pending", note: "Tax transfer status stored", txHash: order.taxTxHash || "" },
+          { key: "crosschain", status: "processing", note: status?.substatus || "Waiting provider settlement", txHash: order.sourceTxHash },
+        ];
+        return order;
+      }
+    } catch (err) {
+      order.status = "processing";
+      order.steps = [
+        { key: "tax", status: order.taxTxHash ? "completed" : "pending", note: "Tax transfer status stored", txHash: order.taxTxHash || "" },
+        { key: "crosschain", status: "processing", note: `Status check pending: ${err.message}`, txHash: order.sourceTxHash },
+      ];
+      return order;
+    }
   }
 
-  order.updatedAt = new Date().toISOString();
+  order.status = "processing";
+  order.steps = [
+    { key: "tax", status: order.taxTxHash ? "completed" : "pending", note: "Tax transfer status stored", txHash: order.taxTxHash || "" },
+    { key: "crosschain", status: "processing", note: "Source transaction submitted", txHash: order.sourceTxHash },
+  ];
   return order;
 }
 
@@ -506,7 +691,25 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && pathname === "/api/execute-swap") {
       const body = await readJsonBody(req);
-      const order = hydrateSwapOrder(createSwapOrder(body));
+      const { intent, execution } = await prepareRealExecution(body);
+      const order = createSwapOrder(intent, execution);
+      json(res, 200, { ok: true, swap: order });
+      return;
+    }
+
+    if (req.method === "POST" && pathname.startsWith("/api/swap/") && pathname.endsWith("/source-tx")) {
+      const id = pathname.split("/")[3] || "";
+      const order = id ? SWAP_ORDERS.get(id) : null;
+      if (!order) {
+        json(res, 404, { ok: false, error: "NOT_FOUND", message: "Swap order not found" });
+        return;
+      }
+      const body = await readJsonBody(req);
+      order.sourceTxHash = String(body?.sourceTxHash || "").trim();
+      order.taxTxHash = String(body?.taxTxHash || "").trim();
+      order.status = order.sourceTxHash ? "processing" : order.status;
+      order.updatedAt = new Date().toISOString();
+      await refreshOrderStatus(order);
       json(res, 200, { ok: true, swap: order });
       return;
     }
@@ -518,7 +721,7 @@ const server = createServer(async (req, res) => {
         json(res, 404, { ok: false, error: "NOT_FOUND", message: "Swap order not found" });
         return;
       }
-      hydrateSwapOrder(order);
+      await refreshOrderStatus(order);
       json(res, 200, { ok: true, swap: order });
       return;
     }
