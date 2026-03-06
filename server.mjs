@@ -68,6 +68,41 @@ const BINANCE_SPOT_SYMBOLS = {
   TRX: "TRXUSDT",
   XRP: "XRPUSDT",
 };
+const OKX_SPOT_PAIRS = {
+  BNB: "BNB-USDT",
+  ETH: "ETH-USDT",
+  POL: "POL-USDT",
+  AVAX: "AVAX-USDT",
+  SOL: "SOL-USDT",
+  TRX: "TRX-USDT",
+  XRP: "XRP-USDT",
+};
+const KUCOIN_SPOT_PAIRS = {
+  BNB: "BNB-USDT",
+  ETH: "ETH-USDT",
+  POL: "POL-USDT",
+  AVAX: "AVAX-USDT",
+  SOL: "SOL-USDT",
+  TRX: "TRX-USDT",
+  XRP: "XRP-USDT",
+};
+const KRAKEN_SPOT_PAIRS = {
+  BNB: "BNBUSD",
+  ETH: "ETHUSD",
+  SOL: "SOLUSD",
+  XRP: "XRPUSD",
+  AVAX: "AVAXUSD",
+  TRX: "TRXUSD",
+};
+const COINCAP_ASSET_IDS = {
+  BNB: "binance-coin",
+  ETH: "ethereum",
+  SOL: "solana",
+  XRP: "xrp",
+  AVAX: "avalanche",
+  TRX: "tron",
+  POL: "polygon",
+};
 const PSHIB_TOKEN_ADDRESS_BSC = "0x9d4c1d37E78A46A991854D6A71F1EEdC9f349150";
 const PSHIB_PAIR_ADDRESS_BSC = "0x29ad7e9efa3c75b573ba1492b814e758f856b17f";
 
@@ -349,6 +384,48 @@ async function fetchBinanceMarketPrices() {
   return prices;
 }
 
+async function fetchOkxMarketPrices() {
+  const prices = {};
+  await Promise.all(Object.entries(OKX_SPOT_PAIRS).map(async ([symbol, pair]) => {
+    const data = await fetchJson(`https://www.okx.com/api/v5/market/ticker?instId=${encodeURIComponent(pair)}`);
+    const ticker = Array.isArray(data?.data) ? data.data[0] : null;
+    const usd = asNum(ticker?.last, 0);
+    if (usd > 0) prices[symbol] = usd;
+  }));
+  return prices;
+}
+
+async function fetchKuCoinMarketPrices() {
+  const prices = {};
+  await Promise.all(Object.entries(KUCOIN_SPOT_PAIRS).map(async ([symbol, pair]) => {
+    const data = await fetchJson(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${encodeURIComponent(pair)}`);
+    const usd = asNum(data?.data?.price, 0);
+    if (usd > 0) prices[symbol] = usd;
+  }));
+  return prices;
+}
+
+async function fetchKrakenMarketPrices() {
+  const prices = {};
+  await Promise.all(Object.entries(KRAKEN_SPOT_PAIRS).map(async ([symbol, pair]) => {
+    const data = await fetchJson(`https://api.kraken.com/0/public/Ticker?pair=${encodeURIComponent(pair)}`);
+    const result = data?.result && typeof data.result === "object" ? Object.values(data.result)[0] : null;
+    const usd = asNum(result?.c?.[0], 0);
+    if (usd > 0) prices[symbol] = usd;
+  }));
+  return prices;
+}
+
+async function fetchCoinCapMarketPrices() {
+  const prices = {};
+  await Promise.all(Object.entries(COINCAP_ASSET_IDS).map(async ([symbol, assetId]) => {
+    const data = await fetchJson(`https://api.coincap.io/v2/assets/${encodeURIComponent(assetId)}`);
+    const usd = asNum(data?.data?.priceUsd, 0);
+    if (usd > 0) prices[symbol] = usd;
+  }));
+  return prices;
+}
+
 async function fetchGeckoTerminalMarketPrices() {
   const prices = {};
   const data = await fetchJson(`https://api.geckoterminal.com/api/v2/simple/networks/bsc/token_price/${PSHIB_TOKEN_ADDRESS_BSC}`);
@@ -367,11 +444,23 @@ async function fetchDexScreenerMarketPrices() {
   return prices;
 }
 
+function stablecoinMarketPrices() {
+  return {
+    USDT: 1,
+    USDC: 1,
+  };
+}
+
 async function fetchAggregatedMarketPrices() {
   const providerFetchers = [
+    { key: "stable", fetcher: async () => stablecoinMarketPrices() },
     { key: "coingecko", fetcher: fetchLiveMarketPrices },
     { key: "coinbase", fetcher: fetchCoinbaseMarketPrices },
     { key: "binance", fetcher: fetchBinanceMarketPrices },
+    { key: "okx", fetcher: fetchOkxMarketPrices },
+    { key: "kucoin", fetcher: fetchKuCoinMarketPrices },
+    { key: "kraken", fetcher: fetchKrakenMarketPrices },
+    { key: "coincap", fetcher: fetchCoinCapMarketPrices },
     { key: "geckoterminal", fetcher: fetchGeckoTerminalMarketPrices },
     { key: "dexscreener", fetcher: fetchDexScreenerMarketPrices },
   ];
@@ -610,6 +699,12 @@ function bridgeAllowList(providerKey) {
   return mapped ? [mapped] : [];
 }
 
+function shouldRetryUnrestrictedLifi(intent) {
+  const fromFamily = getChain(intent?.from?.chain).family;
+  const toFamily = getChain(intent?.to?.chain).family;
+  return fromFamily !== "EVM" || toFamily !== "EVM";
+}
+
 function requireSourceAddress(payload) {
   const fromAddress = String(payload?.fromAddress || payload?.sourceAddress || payload?.intent?.execution?.sourceAddress || "").trim();
   if (!fromAddress) throw new Error("Source wallet address is required for real cross-chain execution");
@@ -654,7 +749,15 @@ async function prepareLifiSwap(intent, payload) {
   });
   const allowed = bridgeAllowList(intent.execution?.providerKey);
   if (allowed.length) params.set("allowBridges", allowed.join(","));
-  const quote = await fetchJson(`${LI_FI_BASE_URL}/quote?${params.toString()}`);
+  let quote;
+  try {
+    quote = await fetchJson(`${LI_FI_BASE_URL}/quote?${params.toString()}`);
+  } catch (err) {
+    if (!allowed.length || !shouldRetryUnrestrictedLifi(intent)) throw err;
+    params.delete("allowBridges");
+    quote = await fetchJson(`${LI_FI_BASE_URL}/quote?${params.toString()}`);
+    quote._pshibdexBridgeFallback = "unrestricted";
+  }
   const tx = quote?.transactionRequest;
   if (!tx?.to) throw new Error("LI.FI quote did not return transactionRequest");
   return {
@@ -710,6 +813,7 @@ function summarizeLifiQuote(intent, quote) {
   return {
     provider: "LI.FI",
     providerKey: intent.execution?.providerKey || "jumper",
+    bridgeFallback: quote?._pshibdexBridgeFallback || "",
     providerFeeUsd,
     providerFeePct: fromAmountUsd > 0 ? (providerFeeUsd / fromAmountUsd) * 100 : 0,
     expectedOutput,
