@@ -51,7 +51,8 @@ const MARKET_PRICE_IDS = {
   TRX: "tron",
   XRP: "ripple",
 };
-const MARKET_PRICE_TTL_MS = 60_000;
+const MARKET_PRICE_TTL_MS = 300_000;
+const LI_FI_QUOTE_CACHE_TTL_MS = 45_000;
 const COINBASE_SPOT_PAIRS = {
   ETH: "ETH-USD",
   POL: "POL-USD",
@@ -235,6 +236,7 @@ const MARKET_PRICE_CACHE = {
   prices: {},
   providers: [],
 };
+const LI_FI_QUOTE_CACHE = new Map();
 const LI_FI_BASE_URL = "https://li.quest/v1";
 const DEBRIDGE_BASE_URL = "https://dln.debridge.finance";
 const DEBRIDGE_STATUS_BASE_URL = "https://stats-api.dln.trade/api/Orders";
@@ -724,6 +726,34 @@ async function fetchJson(url, options = {}) {
   return await res.json();
 }
 
+function getCachedJson(map, key, ttlMs) {
+  const cached = map.get(key);
+  if (!cached) return null;
+  if ((Date.now() - cached.at) > ttlMs) return null;
+  return structuredClone(cached.data);
+}
+
+function setCachedJson(map, key, data) {
+  map.set(key, { at: Date.now(), data: structuredClone(data) });
+}
+
+async function fetchJsonCached(url, ttlMs, cacheMap) {
+  const fresh = getCachedJson(cacheMap, url, ttlMs);
+  if (fresh) return fresh;
+  try {
+    const data = await fetchJson(url);
+    setCachedJson(cacheMap, url, data);
+    return structuredClone(data);
+  } catch (err) {
+    const stale = cacheMap.get(url);
+    if (stale && /429/.test(String(err?.message || ""))) {
+      console.warn("[PepeShibDex] Using stale cached response after rate limit", { url });
+      return structuredClone(stale.data);
+    }
+    throw err;
+  }
+}
+
 async function prepareLifiSwap(intent, payload) {
   const fromChainId = lifiChainId(intent.from.chain);
   const toChainId = lifiChainId(intent.to.chain);
@@ -751,7 +781,7 @@ async function prepareLifiSwap(intent, payload) {
   if (allowed.length) params.set("allowBridges", allowed.join(","));
   let quote;
   try {
-    quote = await fetchJson(`${LI_FI_BASE_URL}/quote?${params.toString()}`);
+    quote = await fetchJsonCached(`${LI_FI_BASE_URL}/quote?${params.toString()}`, LI_FI_QUOTE_CACHE_TTL_MS, LI_FI_QUOTE_CACHE);
   } catch (err) {
     console.error("[PepeShibDex] LI.FI quote failed", {
       fromChain: intent?.from?.chain,
@@ -771,7 +801,7 @@ async function prepareLifiSwap(intent, payload) {
       toToken: intent?.to?.token,
       providerKey: intent?.execution?.providerKey || "",
     });
-    quote = await fetchJson(`${LI_FI_BASE_URL}/quote?${params.toString()}`);
+    quote = await fetchJsonCached(`${LI_FI_BASE_URL}/quote?${params.toString()}`, LI_FI_QUOTE_CACHE_TTL_MS, LI_FI_QUOTE_CACHE);
     quote._pshibdexBridgeFallback = "unrestricted";
   }
   const tx = quote?.transactionRequest;
