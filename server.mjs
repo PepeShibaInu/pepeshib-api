@@ -9,6 +9,7 @@ const ROOT = normalize(__dirname);
 const PORT = Number(process.env.PORT || 8080);
 const CHANGENOW_API_KEY = String(process.env.CHANGENOW_API_KEY || "").trim();
 const SIMPLESWAP_API_KEY = String(process.env.SIMPLESWAP_API_KEY || "").trim();
+const RELAY_API_KEY = String(process.env.RELAY_API_KEY || "").trim();
 
 const CHAINS = [
   { id: "ethereum", name: "Ethereum", family: "EVM" },
@@ -23,7 +24,6 @@ const CHAINS = [
   { id: "linea", name: "Linea", family: "EVM" },
   { id: "solana", name: "Solana", family: "SVM" },
   { id: "tron", name: "Tron", family: "TVM" },
-  { id: "xrpl", name: "XRP Ledger", family: "XRPL" },
 ];
 
 const TOKENS = [
@@ -37,7 +37,6 @@ const TOKENS = [
   { id: "S", usd: 0.05 },
   { id: "SOL", usd: 140 },
   { id: "TRX", usd: 0.13 },
-  { id: "XRP", usd: 0.62 },
 ];
 const MARKET_PRICE_IDS = {
   USDT: "tether",
@@ -49,7 +48,6 @@ const MARKET_PRICE_IDS = {
   S: "sonic-3",
   SOL: "solana",
   TRX: "tron",
-  XRP: "ripple",
 };
 const MARKET_PRICE_TTL_MS = 300_000;
 const LI_FI_QUOTE_CACHE_TTL_MS = 45_000;
@@ -57,7 +55,6 @@ const COINBASE_SPOT_PAIRS = {
   ETH: "ETH-USD",
   POL: "POL-USD",
   SOL: "SOL-USD",
-  XRP: "XRP-USD",
   AVAX: "AVAX-USD",
 };
 const BINANCE_SPOT_SYMBOLS = {
@@ -67,7 +64,6 @@ const BINANCE_SPOT_SYMBOLS = {
   AVAX: "AVAXUSDT",
   SOL: "SOLUSDT",
   TRX: "TRXUSDT",
-  XRP: "XRPUSDT",
 };
 const OKX_SPOT_PAIRS = {
   BNB: "BNB-USDT",
@@ -76,7 +72,6 @@ const OKX_SPOT_PAIRS = {
   AVAX: "AVAX-USDT",
   SOL: "SOL-USDT",
   TRX: "TRX-USDT",
-  XRP: "XRP-USDT",
 };
 const KUCOIN_SPOT_PAIRS = {
   BNB: "BNB-USDT",
@@ -85,13 +80,11 @@ const KUCOIN_SPOT_PAIRS = {
   AVAX: "AVAX-USDT",
   SOL: "SOL-USDT",
   TRX: "TRX-USDT",
-  XRP: "XRP-USDT",
 };
 const KRAKEN_SPOT_PAIRS = {
   BNB: "BNBUSD",
   ETH: "ETHUSD",
   SOL: "SOLUSD",
-  XRP: "XRPUSD",
   AVAX: "AVAXUSD",
   TRX: "TRXUSD",
 };
@@ -99,7 +92,6 @@ const COINCAP_ASSET_IDS = {
   BNB: "binance-coin",
   ETH: "ethereum",
   SOL: "solana",
-  XRP: "xrp",
   AVAX: "avalanche",
   TRX: "tron",
   POL: "polygon",
@@ -124,7 +116,6 @@ const DEFAULT_CFG = {
     linea: "0xTaxLineaTreasury00000000000000000000001",
     solana: "So1TaxWallet11111111111111111111111111111111",
     tron: "TQTaxWallet11111111111111111111111111111",
-    xrpl: "rTaxWallet111111111111111111111111111111",
   },
 };
 
@@ -167,11 +158,11 @@ const AUTO_PROVIDERS = [
     label: "Relay",
     estFeePct: 0.1,
     supports: (q) =>
-      q.fromChain.family === "EVM" &&
-      q.toChain.family === "EVM" &&
+      ["EVM", "TVM"].includes(q.fromChain.family) &&
+      ["EVM", "TVM"].includes(q.toChain.family) &&
       q.fromChain.id !== q.toChain.id,
     url: () => "https://relay.link/bridge",
-    note: "Auto-selected route with EVM bridge aggregation. Verify route details in checkout.",
+    note: "Auto-selected Relay route for EVM/Tron bridge flow. Verify route details in checkout.",
   },
   {
     key: "jumper",
@@ -238,7 +229,9 @@ const MARKET_PRICE_CACHE = {
   providers: [],
 };
 const LI_FI_QUOTE_CACHE = new Map();
+const RELAY_QUOTE_CACHE = new Map();
 const LI_FI_BASE_URL = "https://li.quest/v1";
+const RELAY_BASE_URL = "https://api.relay.link";
 const DEBRIDGE_BASE_URL = "https://dln.debridge.finance";
 const DEBRIDGE_STATUS_BASE_URL = "https://stats-api.dln.trade/api/Orders";
 const ACROSS_BASE_URL = "https://app.across.to/api";
@@ -257,6 +250,11 @@ const EVM_CHAIN_IDS = {
 const LI_FI_CHAIN_IDS = {
   ...EVM_CHAIN_IDS,
   solana: 1151111081099710,
+};
+const RELAY_CHAIN_IDS = {
+  ...EVM_CHAIN_IDS,
+  solana: 792703809,
+  tron: 728126428,
 };
 const TOKEN_META = {
   ethereum: {
@@ -302,6 +300,9 @@ const TOKEN_META = {
   solana: {
     SOL: { address: "11111111111111111111111111111111", decimals: 9 },
     USDC: { address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
+  },
+  tron: {
+    TRX: { address: "0x0000000000000000000000000000000000000000", decimals: 6 },
   },
 };
 const BRIDGE_KEY_MAP = {
@@ -610,12 +611,25 @@ async function buildTaxIntent(payload = {}) {
   const route = await buildRoute(payload);
   const q = route.quote;
   const recipient = String(payload.recipient || "").trim();
-  const executionSupport = q.fromChain.family === "EVM"
-    ? { supported: true, reason: "" }
-    : {
-        supported: false,
-        reason: `Real execution is currently available only for EVM source chains. ${q.fromChain.name} source routes are quote-only right now.`,
+  const executionSupport = (() => {
+    if (q.fromChain.family === "EVM") return { supported: true, reason: "" };
+    if (q.fromChain.family === "SVM" && ["jumper", "mayan"].includes(route.key)) {
+      return {
+        supported: true,
+        reason: "Experimental Solana source execution path enabled via LI.FI-compatible Solana transaction payloads.",
       };
+    }
+    if (q.fromChain.family === "TVM" && route.key === "relay") {
+      return {
+        supported: true,
+        reason: "Experimental Tron source execution path enabled via Relay quote transaction payloads.",
+      };
+    }
+    return {
+      supported: false,
+      reason: `${q.fromChain.name} source routes are quote-only right now. Real execution is currently implemented for EVM sources, selected Solana routes, and Relay-backed Tron routes only.`,
+    };
+  })();
   const taxStep = [
     "STEP 1 - TAX TRANSFER",
     `From Chain: ${q.fromChain.name}`,
@@ -701,8 +715,58 @@ function lifiChainId(chainId) {
   return LI_FI_CHAIN_IDS[chainId] || 0;
 }
 
+function relayChainId(chainId) {
+  return RELAY_CHAIN_IDS[chainId] || 0;
+}
+
 function evmChainId(chainId) {
   return EVM_CHAIN_IDS[chainId] || 0;
+}
+
+function isRelayRoute(intent = {}) {
+  return String(intent?.execution?.providerKey || "").toLowerCase() === "relay";
+}
+
+function relayHeaders() {
+  const headers = { "Content-Type": "application/json" };
+  if (RELAY_API_KEY) headers["x-relay-api-key"] = RELAY_API_KEY;
+  return headers;
+}
+
+function pickRelayExecutionStep(steps = []) {
+  for (const step of Array.isArray(steps) ? steps : []) {
+    const items = Array.isArray(step?.items) ? step.items : [];
+    for (const item of items) {
+      if (item?.data && typeof item.data === "object") {
+        return { step, item };
+      }
+    }
+    if (step?.request && typeof step.request === "object") return { step, item: { data: step.request } };
+    if (step?.data && typeof step.data === "object") return { step, item: { data: step.data } };
+  }
+  return null;
+}
+
+function normalizeRelayCheckUrl(url, requestId = "") {
+  if (typeof url === "string" && url) {
+    try {
+      return new URL(url, RELAY_BASE_URL).toString();
+    } catch {
+      return url;
+    }
+  }
+  if (requestId) return `${RELAY_BASE_URL}/intents/status/v3?requestId=${encodeURIComponent(requestId)}`;
+  return "";
+}
+
+function relayAmountToNumber(value, decimals = 0) {
+  if (value == null || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const raw = String(value);
+  if (/^\d+$/.test(raw) && Number.isFinite(decimals) && decimals > 0) {
+    return formatUnitsHuman(raw, decimals);
+  }
+  return asNum(raw, 0);
 }
 
 function bridgeAllowList(providerKey) {
@@ -718,10 +782,23 @@ function shouldRetryUnrestrictedLifi(intent) {
 
 function realExecutionSupport(intent = {}) {
   const fromChain = getChain(intent?.from?.chain || "");
+  const providerKey = String(intent?.execution?.providerKey || "").toLowerCase();
   if (fromChain.family === "EVM") return { supported: true, reason: "" };
+  if (fromChain.family === "SVM" && ["jumper", "mayan"].includes(providerKey)) {
+    return {
+      supported: true,
+      reason: "Experimental Solana source execution path enabled via LI.FI-compatible Solana transaction payloads.",
+    };
+  }
+  if (fromChain.family === "TVM" && providerKey === "relay") {
+    return {
+      supported: true,
+      reason: "Experimental Tron source execution path enabled via Relay quote transaction payloads.",
+    };
+  }
   return {
     supported: false,
-    reason: `Real execution is currently available only for EVM source chains. ${fromChain.name} source routes are quote-only right now.`,
+    reason: `${fromChain.name} source routes are quote-only right now. Real execution is currently implemented for EVM sources, selected Solana routes, and Relay-backed Tron routes only.`,
   };
 }
 
@@ -823,11 +900,32 @@ async function prepareLifiSwap(intent, payload) {
     quote._pshibdexBridgeFallback = "unrestricted";
   }
   const tx = quote?.transactionRequest;
-  if (!tx?.to) throw new Error("LI.FI quote did not return transactionRequest");
+  if (!tx) throw new Error("LI.FI quote did not return transactionRequest");
+  if (tx?.to) {
+    return {
+      provider: "LI.FI",
+      providerKey: intent.execution?.providerKey || "jumper",
+      kind: "evm",
+      routeId: quote?.id || quote?.transactionId || "",
+      tx,
+      raw: quote,
+    };
+  }
+  if (getChain(intent.from.chain).family === "SVM" && typeof tx?.data === "string" && tx.data) {
+    return {
+      provider: "LI.FI",
+      providerKey: intent.execution?.providerKey || "jumper",
+      kind: "solana",
+      routeId: quote?.id || quote?.transactionId || "",
+      serializedTransaction: tx.data,
+      tx,
+      raw: quote,
+    };
+  }
   return {
     provider: "LI.FI",
     providerKey: intent.execution?.providerKey || "jumper",
-    kind: "evm",
+    kind: "unknown",
     routeId: quote?.id || quote?.transactionId || "",
     tx,
     raw: quote,
@@ -866,6 +964,67 @@ async function prepareAcrossSwap(intent, payload) {
   };
 }
 
+async function prepareRelaySwap(intent, payload) {
+  const fromChainId = relayChainId(intent.from.chain);
+  const toChainId = relayChainId(intent.to.chain);
+  if (!fromChainId || !toChainId) {
+    throw new Error(`Relay does not support ${intent.from.chain} -> ${intent.to.chain}`);
+  }
+  const fromToken = tokenMeta(intent.from.chain, intent.from.token);
+  const toToken = tokenMeta(intent.to.chain, intent.to.token);
+  if (!fromToken || !toToken) {
+    throw new Error(`Relay token mapping missing for ${intent.from.chain}:${intent.from.token} or ${intent.to.chain}:${intent.to.token}`);
+  }
+  const fromAddress = requireSourceAddress(payload);
+  const amount = parseUnitsHuman(intent.execution?.swapAmountAfterTax ?? intent.from.amount, fromToken.decimals);
+  const requestBody = {
+    user: fromAddress,
+    recipient: String(intent.to.recipient || "").trim() || fromAddress,
+    originChainId: fromChainId,
+    destinationChainId: toChainId,
+    originCurrency: fromToken.address,
+    destinationCurrency: toToken.address,
+    amount,
+    tradeType: "EXACT_INPUT",
+    referrer: "pepeshibdex",
+  };
+  const quote = await fetchJson(`${RELAY_BASE_URL}/quote`, {
+    method: "POST",
+    headers: relayHeaders(),
+    body: JSON.stringify(requestBody),
+  });
+  const selected = pickRelayExecutionStep(quote?.steps);
+  const tx = selected?.item?.data || null;
+  if (!tx || typeof tx !== "object") {
+    throw new Error("Relay quote did not return executable transaction data");
+  }
+  const sourceFamily = getChain(intent.from.chain).family;
+  const requestId = String(
+    selected?.item?.requestId ||
+    selected?.step?.requestId ||
+    quote?.requestId ||
+    quote?.details?.requestId ||
+    ""
+  ).trim();
+  const statusUrl = normalizeRelayCheckUrl(
+    selected?.item?.check?.endpoint ||
+    selected?.step?.check?.endpoint ||
+    quote?.check?.endpoint ||
+    "",
+    requestId
+  );
+  return {
+    provider: "Relay",
+    providerKey: "relay",
+    kind: sourceFamily === "TVM" ? "tron" : "evm",
+    tx,
+    routeId: String(quote?.details?.requestId || quote?.requestId || requestId || ""),
+    requestId,
+    statusUrl,
+    raw: quote,
+  };
+}
+
 function summarizeLifiQuote(intent, quote) {
   const feeCosts = Array.isArray(quote?.estimate?.feeCosts) ? quote.estimate.feeCosts : [];
   const gasCosts = Array.isArray(quote?.estimate?.gasCosts) ? quote.estimate.gasCosts : [];
@@ -883,6 +1042,55 @@ function summarizeLifiQuote(intent, quote) {
     expectedOutput,
     minOutput,
     estimatedDurationSec: asNum(quote?.estimate?.executionDuration, 0),
+  };
+}
+
+function summarizeRelayQuote(intent, quote) {
+  const toMeta = tokenMeta(intent.to.chain, intent.to.token);
+  const outputDecimals = Number(
+    quote?.details?.currencyOut?.decimals ??
+    quote?.currencyOut?.decimals ??
+    toMeta?.decimals ??
+    0
+  );
+  const outputRaw =
+    quote?.details?.currencyOut?.amount ??
+    quote?.currencyOut?.amount ??
+    quote?.details?.amountOut ??
+    quote?.amountOut ??
+    0;
+  const minOutputRaw =
+    quote?.details?.currencyOut?.amountReceived ??
+    quote?.details?.currencyOut?.minAmount ??
+    quote?.details?.amountOutMin ??
+    quote?.amountOutMin ??
+    outputRaw;
+  const expectedOutput = relayAmountToNumber(outputRaw, outputDecimals);
+  const minOutput = relayAmountToNumber(minOutputRaw, outputDecimals);
+  const fees = quote?.fees && typeof quote.fees === "object" ? Object.values(quote.fees) : [];
+  const providerFeeUsd = fees.reduce((sum, fee) => {
+    if (!fee || typeof fee !== "object") return sum;
+    return sum + asNum(fee.amountUsd ?? fee.usd ?? fee.amount?.usd, 0);
+  }, 0);
+  const inputUsd = asNum(
+    quote?.details?.currencyIn?.amountUsd ??
+    quote?.details?.amountInUsd ??
+    quote?.currencyIn?.amountUsd,
+    0
+  );
+  return {
+    provider: "Relay",
+    providerKey: "relay",
+    providerFeeUsd,
+    providerFeePct: inputUsd > 0 ? (providerFeeUsd / inputUsd) * 100 : 0,
+    expectedOutput,
+    minOutput,
+    estimatedDurationSec: asNum(
+      quote?.details?.timeEstimate ??
+      quote?.details?.duration ??
+      quote?.timeEstimate,
+      0
+    ),
   };
 }
 
@@ -942,7 +1150,11 @@ async function buildLiveRoutePreview(route, payload) {
     const prepared = await prepareAcrossSwap(intent, { ...payload, fromAddress });
     return summarizeAcrossQuote(intent, prepared.raw);
   }
-  if (["relay", "jumper", "mayan", "debridge"].includes(route.key)) {
+  if (route.key === "relay") {
+    const prepared = await prepareRelaySwap(intent, { ...payload, fromAddress });
+    return summarizeRelayQuote(intent, prepared.raw);
+  }
+  if (["jumper", "mayan", "debridge"].includes(route.key)) {
     const prepared = await prepareLifiSwap(intent, { ...payload, fromAddress });
     return summarizeLifiQuote(intent, prepared.raw);
   }
@@ -957,8 +1169,19 @@ async function prepareRealExecution(payload = {}) {
   const providerKey = String(intent.execution?.providerKey || "").toLowerCase();
   if (!providerKey) throw new Error("Missing execution provider");
   if (providerKey === "across") return { intent, execution: await prepareAcrossSwap(intent, payload) };
-  if (providerKey === "relay" || providerKey === "jumper" || providerKey === "mayan" || providerKey === "debridge") {
-    return { intent, execution: await prepareLifiSwap(intent, payload) };
+  if (providerKey === "relay") {
+    const execution = await prepareRelaySwap(intent, payload);
+    if (!["evm", "tron"].includes(execution?.kind || "")) {
+      throw new Error(`Provider ${providerKey} did not return an executable payload for ${intent.from.chain} source`);
+    }
+    return { intent, execution };
+  }
+  if (providerKey === "jumper" || providerKey === "mayan" || providerKey === "debridge") {
+    const execution = await prepareLifiSwap(intent, payload);
+    if (!["evm", "solana"].includes(execution?.kind || "")) {
+      throw new Error(`Provider ${providerKey} did not return an executable payload for ${intent.from.chain} source`);
+    }
+    return { intent, execution };
   }
   throw new Error(`Provider ${providerKey} is not wired for real execution yet`);
 }
@@ -987,7 +1210,53 @@ async function refreshOrderStatus(order) {
   if (!order?.sourceTxHash) return order;
 
   const providerKey = String(order?.preparedExecution?.providerKey || "").toLowerCase();
-  if (providerKey === "across" || providerKey === "relay" || providerKey === "jumper" || providerKey === "mayan" || providerKey === "debridge") {
+  if (providerKey === "relay") {
+    try {
+      const statusUrl = normalizeRelayCheckUrl(
+        order?.preparedExecution?.statusUrl || "",
+        order?.preparedExecution?.requestId || ""
+      );
+      if (statusUrl) {
+        const status = await fetchJson(statusUrl, { headers: relayHeaders() });
+        const relayStatus = String(
+          status?.status ||
+          status?.details?.status ||
+          status?.data?.status ||
+          ""
+        ).toLowerCase();
+        if (["success", "completed", "done"].includes(relayStatus)) {
+          order.status = "completed";
+          order.steps = [
+            { key: "tax", status: order.taxTxHash ? "completed" : "pending", note: "Tax transfer status stored", txHash: order.taxTxHash || "" },
+            { key: "crosschain", status: "completed", note: "Relay bridge completed on-chain", txHash: order.sourceTxHash },
+          ];
+          return order;
+        }
+        if (["failed", "refund", "refunded", "cancelled", "canceled"].includes(relayStatus)) {
+          order.status = "failed";
+          order.steps = [
+            { key: "tax", status: order.taxTxHash ? "completed" : "pending", note: "Tax transfer status stored", txHash: order.taxTxHash || "" },
+            { key: "crosschain", status: "failed", note: status?.details?.message || status?.message || "Relay reported failure", txHash: order.sourceTxHash },
+          ];
+          return order;
+        }
+        order.status = "processing";
+        order.steps = [
+          { key: "tax", status: order.taxTxHash ? "completed" : "pending", note: "Tax transfer status stored", txHash: order.taxTxHash || "" },
+          { key: "crosschain", status: "processing", note: status?.details?.message || status?.message || relayStatus || "Waiting Relay settlement", txHash: order.sourceTxHash },
+        ];
+        return order;
+      }
+    } catch (err) {
+      order.status = "processing";
+      order.steps = [
+        { key: "tax", status: order.taxTxHash ? "completed" : "pending", note: "Tax transfer status stored", txHash: order.taxTxHash || "" },
+        { key: "crosschain", status: "processing", note: `Relay status check pending: ${err.message}`, txHash: order.sourceTxHash },
+      ];
+      return order;
+    }
+  }
+  if (providerKey === "across" || providerKey === "jumper" || providerKey === "mayan" || providerKey === "debridge") {
     try {
       const fromChain = lifiChainId(order.intent?.from?.chain);
       const toChain = lifiChainId(order.intent?.to?.chain);
@@ -1127,6 +1396,7 @@ const server = createServer(async (req, res) => {
         providerKeys: {
           changenow: Boolean(CHANGENOW_API_KEY),
           simpleswap: Boolean(SIMPLESWAP_API_KEY),
+          relay: Boolean(RELAY_API_KEY),
         },
       });
       return;
