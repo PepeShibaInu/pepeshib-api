@@ -39,7 +39,6 @@ const TOKENS = [
   { id: "TRX", usd: 0.13 },
   { id: "XRP", usd: 0.62 },
 ];
-const STATIC_TOKEN_USD = Object.fromEntries(TOKENS.map((token) => [token.id, token.usd]));
 const MARKET_PRICE_IDS = {
   USDT: "tether",
   USDC: "usd-coin",
@@ -53,6 +52,23 @@ const MARKET_PRICE_IDS = {
   XRP: "ripple",
 };
 const MARKET_PRICE_TTL_MS = 60_000;
+const COINBASE_SPOT_PAIRS = {
+  ETH: "ETH-USD",
+  SOL: "SOL-USD",
+  XRP: "XRP-USD",
+  AVAX: "AVAX-USD",
+};
+const BINANCE_SPOT_SYMBOLS = {
+  BNB: "BNBUSDT",
+  ETH: "ETHUSDT",
+  MATIC: "MATICUSDT",
+  AVAX: "AVAXUSDT",
+  SOL: "SOLUSDT",
+  TRX: "TRXUSDT",
+  XRP: "XRPUSDT",
+};
+const PSHIB_TOKEN_ADDRESS_BSC = "0x9d4c1d37E78A46A991854D6A71F1EEdC9f349150";
+const PSHIB_PAIR_ADDRESS_BSC = "0x29ad7e9efa3c75b573ba1492b814e758f856b17f";
 
 const DEFAULT_CFG = {
   taxPercent: 0.15,
@@ -179,8 +195,9 @@ const MIME = {
 const SWAP_ORDERS = new Map();
 const MARKET_PRICE_CACHE = {
   updatedAt: 0,
-  source: "static",
-  prices: { ...STATIC_TOKEN_USD },
+  source: "uninitialized",
+  prices: {},
+  providers: [],
 };
 const LI_FI_BASE_URL = "https://li.quest/v1";
 const DEBRIDGE_BASE_URL = "https://dln.debridge.finance";
@@ -283,7 +300,7 @@ function getChain(id) {
 
 function getToken(id, prices = null) {
   const token = TOKENS.find((t) => t.id === id) || TOKENS[0];
-  const usd = prices && prices[token.id] != null ? asNum(prices[token.id], token.usd) : token.usd;
+  const usd = prices && prices[token.id] != null ? asNum(prices[token.id], 0) : 0;
   return { ...token, usd };
 }
 
@@ -303,12 +320,85 @@ async function fetchLiveMarketPrices() {
     vs_currencies: "usd",
   });
   const data = await fetchJson(`https://api.coingecko.com/api/v3/simple/price?${params.toString()}`);
-  const prices = { ...STATIC_TOKEN_USD };
+  const prices = {};
   Object.entries(MARKET_PRICE_IDS).forEach(([symbol, id]) => {
     const usd = asNum(data?.[id]?.usd, 0);
     if (usd > 0) prices[symbol] = usd;
   });
   return prices;
+}
+
+async function fetchCoinbaseMarketPrices() {
+  const prices = {};
+  await Promise.all(Object.entries(COINBASE_SPOT_PAIRS).map(async ([symbol, pair]) => {
+    const data = await fetchJson(`https://api.coinbase.com/v2/prices/${pair}/spot`);
+    const usd = asNum(data?.data?.amount, 0);
+    if (usd > 0) prices[symbol] = usd;
+  }));
+  return prices;
+}
+
+async function fetchBinanceMarketPrices() {
+  const prices = {};
+  await Promise.all(Object.entries(BINANCE_SPOT_SYMBOLS).map(async ([symbol, pair]) => {
+    const data = await fetchJson(`https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(pair)}`);
+    const usd = asNum(data?.price, 0);
+    if (usd > 0) prices[symbol] = usd;
+  }));
+  return prices;
+}
+
+async function fetchGeckoTerminalMarketPrices() {
+  const prices = {};
+  const data = await fetchJson(`https://api.geckoterminal.com/api/v2/simple/networks/bsc/token_price/${PSHIB_TOKEN_ADDRESS_BSC}`);
+  const tokenPrices = data?.data?.attributes?.token_prices || {};
+  const usd = asNum(tokenPrices?.[PSHIB_TOKEN_ADDRESS_BSC] ?? tokenPrices?.[PSHIB_TOKEN_ADDRESS_BSC.toLowerCase()] ?? 0, 0);
+  if (usd > 0) prices.PSHIB = usd;
+  return prices;
+}
+
+async function fetchDexScreenerMarketPrices() {
+  const prices = {};
+  const data = await fetchJson(`https://api.dexscreener.com/latest/dex/pairs/bsc/${PSHIB_PAIR_ADDRESS_BSC}`);
+  const pair = Array.isArray(data?.pairs) ? data.pairs[0] : null;
+  const usd = asNum(pair?.priceUsd, 0);
+  if (usd > 0) prices.PSHIB = usd;
+  return prices;
+}
+
+async function fetchAggregatedMarketPrices() {
+  const providerFetchers = [
+    { key: "coingecko", fetcher: fetchLiveMarketPrices },
+    { key: "coinbase", fetcher: fetchCoinbaseMarketPrices },
+    { key: "binance", fetcher: fetchBinanceMarketPrices },
+    { key: "geckoterminal", fetcher: fetchGeckoTerminalMarketPrices },
+    { key: "dexscreener", fetcher: fetchDexScreenerMarketPrices },
+  ];
+  const prices = {};
+  const activeProviders = [];
+
+  for (const provider of providerFetchers) {
+    try {
+      const next = await provider.fetcher();
+      let merged = false;
+      Object.entries(next || {}).forEach(([symbol, usd]) => {
+        const value = asNum(usd, 0);
+        if (value > 0) {
+          prices[symbol] = value;
+          merged = true;
+        }
+      });
+      if (merged) activeProviders.push(provider.key);
+    } catch (err) {
+      console.warn(`[PepeShibDex] Market price provider failed: ${provider.key}: ${err?.message || err}`);
+    }
+  }
+
+  return {
+    prices,
+    source: activeProviders.length ? activeProviders.join("+") : "unavailable",
+    providers: activeProviders,
+  };
 }
 
 async function getMarketPrices(forceRefresh = false) {
@@ -317,16 +407,22 @@ async function getMarketPrices(forceRefresh = false) {
     return { ...MARKET_PRICE_CACHE.prices };
   }
   try {
-    const prices = await fetchLiveMarketPrices();
-    MARKET_PRICE_CACHE.prices = prices;
+    const result = await fetchAggregatedMarketPrices();
+    if (!Object.keys(result.prices).length) {
+      throw new Error("No live market prices available from configured providers");
+    }
+    MARKET_PRICE_CACHE.prices = result.prices;
     MARKET_PRICE_CACHE.updatedAt = now;
-    MARKET_PRICE_CACHE.source = "coingecko";
-  } catch (_) {
+    MARKET_PRICE_CACHE.source = result.source;
+    MARKET_PRICE_CACHE.providers = result.providers;
+  } catch (err) {
+    console.warn(`[PepeShibDex] No live market price snapshot available: ${err?.message || err}`);
     if (!MARKET_PRICE_CACHE.updatedAt) {
       MARKET_PRICE_CACHE.updatedAt = now;
-      MARKET_PRICE_CACHE.prices = { ...STATIC_TOKEN_USD };
+      MARKET_PRICE_CACHE.prices = {};
     }
-    MARKET_PRICE_CACHE.source = MARKET_PRICE_CACHE.source || "static";
+    MARKET_PRICE_CACHE.source = MARKET_PRICE_CACHE.source || "unavailable";
+    MARKET_PRICE_CACHE.providers = Array.isArray(MARKET_PRICE_CACHE.providers) ? MARKET_PRICE_CACHE.providers : [];
   }
   return { ...MARKET_PRICE_CACHE.prices };
 }
@@ -351,6 +447,12 @@ async function computeQuote(payload = {}) {
 
   const amountAfterTaxOnly = Math.max(0, amountIn - taxAmount);
   const amountAfterFees = Math.max(0, amountIn - taxAmount - protocolAmount - bridgeAmount);
+  if (!(fromToken.usd > 0)) {
+    throw new Error(`Live price unavailable for source token ${fromToken.id}`);
+  }
+  if (!(toToken.usd > 0)) {
+    throw new Error(`Live price unavailable for destination token ${toToken.id}`);
+  }
   const usdValue = amountAfterFees * fromToken.usd;
   const grossOut = toToken.usd > 0 ? usdValue / toToken.usd : 0;
   const minOut = Math.max(0, grossOut - (grossOut * slippagePct) / 100);
@@ -848,6 +950,7 @@ const server = createServer(async (req, res) => {
         service: "pshibdex-local-api",
         marketPricesUpdatedAt: MARKET_PRICE_CACHE.updatedAt || null,
         marketPriceSource: MARKET_PRICE_CACHE.source,
+        marketPriceProviders: MARKET_PRICE_CACHE.providers,
         providerKeys: {
           changenow: Boolean(CHANGENOW_API_KEY),
           simpleswap: Boolean(SIMPLESWAP_API_KEY),
@@ -862,6 +965,7 @@ const server = createServer(async (req, res) => {
         ok: true,
         source: MARKET_PRICE_CACHE.source,
         updatedAt: MARKET_PRICE_CACHE.updatedAt,
+        providers: MARKET_PRICE_CACHE.providers,
         prices,
       });
       return;
