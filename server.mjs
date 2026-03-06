@@ -29,10 +29,10 @@ const CHAINS = [
 const TOKENS = [
   { id: "USDT", usd: 1 },
   { id: "USDC", usd: 1 },
-  { id: "PSHIB", usd: 0.00002 },
+  { id: "PEPESHIB", usd: 0.00002 },
   { id: "BNB", usd: 560 },
   { id: "ETH", usd: 3200 },
-  { id: "MATIC", usd: 0.95 },
+  { id: "POL", usd: 0.95 },
   { id: "AVAX", usd: 42 },
   { id: "S", usd: 0.05 },
   { id: "SOL", usd: 140 },
@@ -44,7 +44,7 @@ const MARKET_PRICE_IDS = {
   USDC: "usd-coin",
   BNB: "binancecoin",
   ETH: "ethereum",
-  MATIC: "matic-network",
+  POL: "polygon-ecosystem-token",
   AVAX: "avalanche-2",
   S: "sonic-3",
   SOL: "solana",
@@ -54,6 +54,7 @@ const MARKET_PRICE_IDS = {
 const MARKET_PRICE_TTL_MS = 60_000;
 const COINBASE_SPOT_PAIRS = {
   ETH: "ETH-USD",
+  POL: "POL-USD",
   SOL: "SOL-USD",
   XRP: "XRP-USD",
   AVAX: "AVAX-USD",
@@ -61,7 +62,7 @@ const COINBASE_SPOT_PAIRS = {
 const BINANCE_SPOT_SYMBOLS = {
   BNB: "BNBUSDT",
   ETH: "ETHUSDT",
-  MATIC: "MATICUSDT",
+  POL: "POLUSDT",
   AVAX: "AVAXUSDT",
   SOL: "SOLUSDT",
   TRX: "TRXUSDT",
@@ -231,7 +232,7 @@ const TOKEN_META = {
     USDC: { address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", decimals: 18 },
   },
   polygon: {
-    MATIC: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    POL: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
     USDT: { address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6 },
     USDC: { address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", decimals: 6 },
   },
@@ -353,7 +354,7 @@ async function fetchGeckoTerminalMarketPrices() {
   const data = await fetchJson(`https://api.geckoterminal.com/api/v2/simple/networks/bsc/token_price/${PSHIB_TOKEN_ADDRESS_BSC}`);
   const tokenPrices = data?.data?.attributes?.token_prices || {};
   const usd = asNum(tokenPrices?.[PSHIB_TOKEN_ADDRESS_BSC] ?? tokenPrices?.[PSHIB_TOKEN_ADDRESS_BSC.toLowerCase()] ?? 0, 0);
-  if (usd > 0) prices.PSHIB = usd;
+  if (usd > 0) prices.PEPESHIB = usd;
   return prices;
 }
 
@@ -362,7 +363,7 @@ async function fetchDexScreenerMarketPrices() {
   const data = await fetchJson(`https://api.dexscreener.com/latest/dex/pairs/bsc/${PSHIB_PAIR_ADDRESS_BSC}`);
   const pair = Array.isArray(data?.pairs) ? data.pairs[0] : null;
   const usd = asNum(pair?.priceUsd, 0);
-  if (usd > 0) prices.PSHIB = usd;
+  if (usd > 0) prices.PEPESHIB = usd;
   return prices;
 }
 
