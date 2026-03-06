@@ -229,6 +229,22 @@ const BRIDGE_KEY_MAP = {
   debridge: "debridge",
 };
 
+function applyCors(req, res, extra = {}) {
+  const requestedHeaders = String(req.headers["access-control-request-headers"] || "").trim();
+  const allowHeaders = requestedHeaders || "Content-Type, Authorization, X-Requested-With, Accept, Origin";
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Headers": allowHeaders,
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin, Access-Control-Request-Headers",
+    ...extra,
+  };
+  Object.entries(headers).forEach(([key, value]) => {
+    res.setHeader(key, value);
+  });
+}
+
 function asNum(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -580,7 +596,6 @@ function json(res, status, payload) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body),
-    "Access-Control-Allow-Origin": "*",
   });
   res.end(body);
 }
@@ -641,11 +656,8 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === "OPTIONS") {
-    res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    });
+    applyCors(req, res);
+    res.writeHead(204);
     res.end();
     return;
   }
@@ -654,6 +666,10 @@ const server = createServer(async (req, res) => {
   const { pathname } = reqUrl;
 
   try {
+    if (pathname.startsWith("/api/")) {
+      applyCors(req, res);
+    }
+
     if (req.method === "GET" && pathname === "/api/health") {
       json(res, 200, { ok: true, service: "pshibdex-local-api" });
       return;
