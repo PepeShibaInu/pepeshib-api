@@ -22,6 +22,22 @@ const CHAINS = [
   { id: "sonic", name: "Sonic", family: "EVM" },
   { id: "zksync", name: "zkSync Era", family: "EVM" },
   { id: "linea", name: "Linea", family: "EVM" },
+  { id: "neon", name: "Neon", family: "EVM" },
+  { id: "gnosis", name: "Gnosis", family: "EVM" },
+  { id: "zilliqa", name: "Zilliqa EVM", family: "EVM" },
+  { id: "flow", name: "Flow EVM", family: "EVM" },
+  { id: "story", name: "Story", family: "EVM" },
+  { id: "abstract", name: "Abstract", family: "EVM" },
+  { id: "cronos", name: "Cronos", family: "EVM" },
+  { id: "berachain", name: "Berachain", family: "EVM" },
+  { id: "bob", name: "BOB", family: "EVM" },
+  { id: "hyperevm", name: "HyperEVM", family: "EVM" },
+  { id: "mantle", name: "Mantle", family: "EVM" },
+  { id: "sophon", name: "Sophon", family: "EVM" },
+  { id: "sei", name: "Sei", family: "EVM" },
+  { id: "plasma", name: "Plasma", family: "EVM" },
+  { id: "injective", name: "Injective EVM", family: "EVM" },
+  { id: "monad", name: "Monad", family: "EVM" },
   { id: "solana", name: "Solana", family: "SVM" },
   { id: "tron", name: "Tron", family: "TVM" },
 ];
@@ -35,6 +51,20 @@ const TOKENS = [
   { id: "POL", usd: 0.95 },
   { id: "AVAX", usd: 42 },
   { id: "S", usd: 0.05 },
+  { id: "NEON", usd: 0.4 },
+  { id: "XDAI", usd: 1 },
+  { id: "ZIL", usd: 0.03 },
+  { id: "FLOW", usd: 0.8 },
+  { id: "IP", usd: 3 },
+  { id: "CRO", usd: 0.15 },
+  { id: "BERA", usd: 8 },
+  { id: "HYPE", usd: 20 },
+  { id: "MNT", usd: 1 },
+  { id: "SOPH", usd: 0.1 },
+  { id: "SEI", usd: 0.5 },
+  { id: "XPL", usd: 0.1 },
+  { id: "INJ", usd: 25 },
+  { id: "MON", usd: 1 },
   { id: "SOL", usd: 140 },
   { id: "TRX", usd: 0.13 },
 ];
@@ -46,11 +76,25 @@ const MARKET_PRICE_IDS = {
   POL: "polygon-ecosystem-token",
   AVAX: "avalanche-2",
   S: "sonic-3",
+  NEON: "neon-evm",
+  ZIL: "zilliqa",
+  FLOW: "flow",
+  IP: "story-2",
+  CRO: "crypto-com-chain",
+  BERA: "berachain-bera",
+  HYPE: "hyperliquid",
+  MNT: "mantle",
+  SOPH: "sophon",
+  SEI: "sei-network",
+  XPL: "plasma",
+  INJ: "injective-protocol",
+  MON: "monad",
   SOL: "solana",
   TRX: "tron",
 };
 const MARKET_PRICE_TTL_MS = 300_000;
 const LI_FI_QUOTE_CACHE_TTL_MS = 45_000;
+const MIN_SLIPPAGE = 0.01;
 const COINBASE_SPOT_PAIRS = {
   ETH: "ETH-USD",
   POL: "POL-USD",
@@ -114,10 +158,57 @@ const DEFAULT_CFG = {
     sonic: "0xTaxSonicTreasury00000000000000000000001",
     zksync: "0xTaxZkTreasury00000000000000000000000001",
     linea: "0xTaxLineaTreasury00000000000000000000001",
+    neon: "0xTaxNeonTreasury000000000000000000000001",
+    gnosis: "0xTaxGnosisTreasury0000000000000000000001",
+    zilliqa: "0xTaxZilliqaTreasury00000000000000000001",
+    flow: "0xTaxFlowTreasury000000000000000000000001",
+    story: "0xTaxStoryTreasury00000000000000000000001",
+    abstract: "0xTaxAbstractTreasury0000000000000000001",
+    cronos: "0xTaxCronosTreasury0000000000000000000001",
+    berachain: "0xTaxBerachainTreasury000000000000000001",
+    bob: "0xTaxBobTreasury00000000000000000000000001",
+    hyperevm: "0xTaxHyperEvmTreasury0000000000000000001",
+    mantle: "0xTaxMantleTreasury000000000000000000001",
+    sophon: "0xTaxSophonTreasury000000000000000000001",
+    sei: "0xTaxSeiTreasury0000000000000000000000001",
+    plasma: "0xTaxPlasmaTreasury0000000000000000000001",
+    injective: "0xTaxInjectiveTreasury000000000000000001",
+    monad: "0xTaxMonadTreasury00000000000000000000001",
     solana: "So1TaxWallet11111111111111111111111111111111",
     tron: "TQTaxWallet11111111111111111111111111111",
   },
 };
+
+function isAcrossChain(chainId) {
+  return Boolean(ACROSS_EVM_CHAIN_IDS[chainId]);
+}
+
+function isLifiChain(chainId) {
+  return Boolean(LI_FI_CHAIN_IDS[chainId]);
+}
+
+function isRelayChain(chainId) {
+  return Boolean(RELAY_CHAIN_IDS[chainId]);
+}
+
+function debridgeChainId(chainId) {
+  return DEBRIDGE_CHAIN_IDS[chainId] || 0;
+}
+
+function isDebridgeDirectChain(chainId) {
+  return DEBRIDGE_DIRECT_CHAIN_KEYS.has(chainId);
+}
+
+function shouldUseDirectDebridge(intent = {}) {
+  const fromChain = String(intent?.from?.chain || "");
+  const toChain = String(intent?.to?.chain || "");
+  return (
+    getChain(fromChain).family === "EVM" &&
+    getChain(toChain).family === "EVM" &&
+    Boolean(debridgeChainId(fromChain) && debridgeChainId(toChain)) &&
+    (isDebridgeDirectChain(fromChain) || isDebridgeDirectChain(toChain))
+  );
+}
 
 const AUTO_PROVIDERS = [
   {
@@ -127,7 +218,9 @@ const AUTO_PROVIDERS = [
     supports: (q) =>
       q.fromChain.family === "EVM" &&
       q.toChain.family === "EVM" &&
-      q.fromChain.id !== q.toChain.id,
+      q.fromChain.id !== q.toChain.id &&
+      isAcrossChain(q.fromChain.id) &&
+      isAcrossChain(q.toChain.id),
     url: () => "https://app.across.to/",
     note: "Auto-selected low-fee EVM bridge route. Verify route details in checkout.",
   },
@@ -138,7 +231,9 @@ const AUTO_PROVIDERS = [
     supports: (q) =>
       q.fromChain.family === "EVM" &&
       q.toChain.family === "EVM" &&
-      q.fromChain.id !== q.toChain.id,
+      q.fromChain.id !== q.toChain.id &&
+      isLifiChain(q.fromChain.id) &&
+      isLifiChain(q.toChain.id),
     url: () => "https://app.debridge.finance/",
     note: "Auto-selected deBridge route for EVM bridge flow. Verify route details in checkout.",
   },
@@ -149,7 +244,9 @@ const AUTO_PROVIDERS = [
     supports: (q) =>
       ["EVM", "SVM"].includes(q.fromChain.family) &&
       ["EVM", "SVM"].includes(q.toChain.family) &&
-      q.fromChain.id !== q.toChain.id,
+      q.fromChain.id !== q.toChain.id &&
+      isLifiChain(q.fromChain.id) &&
+      isLifiChain(q.toChain.id),
     url: () => "https://swap.mayan.finance/",
     note: "Auto-selected route for EVM/Solana flow. Verify route details in checkout.",
   },
@@ -160,7 +257,9 @@ const AUTO_PROVIDERS = [
     supports: (q) =>
       ["EVM", "TVM"].includes(q.fromChain.family) &&
       ["EVM", "TVM"].includes(q.toChain.family) &&
-      q.fromChain.id !== q.toChain.id,
+      q.fromChain.id !== q.toChain.id &&
+      isRelayChain(q.fromChain.id) &&
+      isRelayChain(q.toChain.id),
     url: () => "https://relay.link/bridge",
     note: "Auto-selected Relay route for EVM/Tron bridge flow. Verify route details in checkout.",
   },
@@ -171,7 +270,9 @@ const AUTO_PROVIDERS = [
     supports: (q) =>
       ["EVM", "SVM"].includes(q.fromChain.family) &&
       ["EVM", "SVM"].includes(q.toChain.family) &&
-      q.fromChain.id !== q.toChain.id,
+      q.fromChain.id !== q.toChain.id &&
+      isLifiChain(q.fromChain.id) &&
+      isLifiChain(q.toChain.id),
     url: () => "https://jumper.exchange/",
     note: "Auto-selected LI.FI aggregator route for EVM/Solana flow. Verify route details in checkout.",
   },
@@ -230,12 +331,13 @@ const MARKET_PRICE_CACHE = {
 };
 const LI_FI_QUOTE_CACHE = new Map();
 const RELAY_QUOTE_CACHE = new Map();
+const DEBRIDGE_QUOTE_CACHE = new Map();
 const LI_FI_BASE_URL = "https://li.quest/v1";
 const RELAY_BASE_URL = "https://api.relay.link";
 const DEBRIDGE_BASE_URL = "https://dln.debridge.finance";
-const DEBRIDGE_STATUS_BASE_URL = "https://stats-api.dln.trade/api/Orders";
+const DEBRIDGE_STATUS_BASE_URL = "https://dln.debridge.finance/v1.0/dln/order";
 const ACROSS_BASE_URL = "https://app.across.to/api";
-const EVM_CHAIN_IDS = {
+const ACROSS_EVM_CHAIN_IDS = {
   ethereum: 1,
   bsc: 56,
   polygon: 137,
@@ -247,15 +349,75 @@ const EVM_CHAIN_IDS = {
   zksync: 324,
   linea: 59144,
 };
+const EVM_CHAIN_IDS = {
+  ...ACROSS_EVM_CHAIN_IDS,
+  neon: 245022934,
+  gnosis: 100,
+  zilliqa: 32769,
+  flow: 747,
+  story: 1514,
+  abstract: 2741,
+  cronos: 25,
+  berachain: 80094,
+  bob: 60808,
+  hyperevm: 999,
+  mantle: 5000,
+  sophon: 50104,
+  sei: 1329,
+  plasma: 9745,
+  injective: 1776,
+  monad: 143,
+};
 const LI_FI_CHAIN_IDS = {
-  ...EVM_CHAIN_IDS,
+  ...ACROSS_EVM_CHAIN_IDS,
   solana: 1151111081099710,
 };
 const RELAY_CHAIN_IDS = {
-  ...EVM_CHAIN_IDS,
+  ...ACROSS_EVM_CHAIN_IDS,
+  gnosis: 100,
+  flow: 747,
+  story: 1514,
+  abstract: 2741,
+  cronos: 25,
+  berachain: 80094,
+  bob: 60808,
+  hyperevm: 999,
+  mantle: 5000,
+  sei: 1329,
+  plasma: 9745,
+  monad: 143,
   solana: 792703809,
   tron: 728126428,
 };
+const DEBRIDGE_CHAIN_IDS = {
+  ethereum: 1,
+  bsc: 56,
+  polygon: 137,
+  arbitrum: 42161,
+  optimism: 10,
+  base: 8453,
+  avalanche: 43114,
+  linea: 59144,
+  sonic: 100000014,
+  neon: 100000001,
+  gnosis: 100000002,
+  zilliqa: 100000008,
+  flow: 100000009,
+  story: 100000013,
+  abstract: 100000017,
+  cronos: 100000019,
+  berachain: 100000020,
+  bob: 100000021,
+  hyperevm: 100000022,
+  mantle: 100000023,
+  sophon: 100000025,
+  sei: 100000027,
+  plasma: 100000028,
+  injective: 100000029,
+  monad: 100000030,
+  tron: 100000026,
+};
+const DEBRIDGE_DIRECT_CHAIN_KEYS = new Set(["neon", "zilliqa", "sophon", "injective"]);
 const TOKEN_META = {
   ethereum: {
     ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
@@ -296,6 +458,66 @@ const TOKEN_META = {
     S: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
     USDT: { address: "0x6047828dc181963ba44974801ff68e538da5eaf9", decimals: 6 },
     USDC: { address: "0x29219dd400f2Bf60E5a23d13Be72B486D4038894", decimals: 6 },
+  },
+  neon: {
+    NEON: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDC: { address: "0xEA6B04272f9f62F997F666F07D3a974134f7FFb9", decimals: 6 },
+    USDT: { address: "0x5f0155d08eF4aaE2B500AefB64A3419dA8bB611a", decimals: 6 },
+  },
+  gnosis: {
+    XDAI: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDC: { address: "0x2a22f9c3b484c3629090feed35f17ff8f88f76f0", decimals: 6 },
+  },
+  zilliqa: {
+    ZIL: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+  },
+  flow: {
+    FLOW: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDC: { address: "0xf1815bd50389c46847f0bda824ec8da914045d14", decimals: 6 },
+  },
+  story: {
+    IP: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDC: { address: "0xf1815bd50389c46847f0bda824ec8da914045d14", decimals: 6 },
+  },
+  abstract: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDC: { address: "0x84a71ccd554cc1b02749b35d22f684cc8ec987e1", decimals: 6 },
+  },
+  cronos: {
+    CRO: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDC: { address: "0xc21223249ca28397b4b6541dffaecc539bff0c59", decimals: 6 },
+  },
+  berachain: {
+    BERA: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDC: { address: "0x549943e04f40284185054145c6e4e9568c1d3241", decimals: 6 },
+  },
+  bob: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+  },
+  hyperevm: {
+    HYPE: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDC: { address: "0xb88339cb7199b77e23db6e890353e22632ba630f", decimals: 6 },
+  },
+  mantle: {
+    MNT: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDC: { address: "0x09bc4e0d864854c6afb6eb9a9cdf58ac190d0df9", decimals: 6 },
+  },
+  sophon: {
+    SOPH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDC: { address: "0x9Aa0F72392B5784Ad86c6f3E899bCc053D00Db4F", decimals: 6 },
+  },
+  sei: {
+    SEI: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+  },
+  plasma: {
+    XPL: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+  },
+  injective: {
+    INJ: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+  },
+  monad: {
+    MON: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDC: { address: "0x754704bc059f8c67012fed69bc8a327a5aafb603", decimals: 6 },
   },
   solana: {
     SOL: { address: "11111111111111111111111111111111", decimals: 9 },
@@ -452,6 +674,7 @@ function stablecoinMarketPrices() {
   return {
     USDT: 1,
     USDC: 1,
+    XDAI: 1,
   };
 }
 
@@ -524,7 +747,7 @@ async function getMarketPrices(forceRefresh = false) {
 async function computeQuote(payload = {}) {
   const config = getConfig(payload.config);
   const amountIn = Math.max(0, asNum(payload.amount, 0));
-  const slippagePct = Math.max(0, asNum(payload.slippage, 0.5));
+  const slippagePct = Math.max(MIN_SLIPPAGE, asNum(payload.slippage, 0.5));
   const prices = await getMarketPrices(Boolean(payload.forcePriceRefresh));
 
   const fromToken = getToken(payload.fromToken, prices);
@@ -611,25 +834,11 @@ async function buildTaxIntent(payload = {}) {
   const route = await buildRoute(payload);
   const q = route.quote;
   const recipient = String(payload.recipient || "").trim();
-  const executionSupport = (() => {
-    if (q.fromChain.family === "EVM") return { supported: true, reason: "" };
-    if (q.fromChain.family === "SVM" && ["jumper", "mayan"].includes(route.key)) {
-      return {
-        supported: true,
-        reason: "Experimental Solana source execution path enabled via LI.FI-compatible Solana transaction payloads.",
-      };
-    }
-    if (q.fromChain.family === "TVM" && route.key === "relay") {
-      return {
-        supported: true,
-        reason: "Experimental Tron source execution path enabled via Relay quote transaction payloads.",
-      };
-    }
-    return {
-      supported: false,
-      reason: `${q.fromChain.name} source routes are quote-only right now. Real execution is currently implemented for EVM sources, selected Solana routes, and Relay-backed Tron routes only.`,
-    };
-  })();
+  const executionSupport = realExecutionSupport({
+    from: { chain: q.fromChain.id, token: q.fromToken.id },
+    to: { chain: q.toChain.id, token: q.toToken.id },
+    execution: { providerKey: route.key },
+  });
   const taxStep = [
     "STEP 1 - TAX TRANSFER",
     `From Chain: ${q.fromChain.name}`,
@@ -723,6 +932,10 @@ function evmChainId(chainId) {
   return EVM_CHAIN_IDS[chainId] || 0;
 }
 
+function acrossChainId(chainId) {
+  return ACROSS_EVM_CHAIN_IDS[chainId] || 0;
+}
+
 function isRelayRoute(intent = {}) {
   return String(intent?.execution?.providerKey || "").toLowerCase() === "relay";
 }
@@ -780,25 +993,82 @@ function shouldRetryUnrestrictedLifi(intent) {
   return fromFamily !== "EVM" || toFamily !== "EVM";
 }
 
+function hasIntentTokenMeta(intent = {}) {
+  return Boolean(
+    tokenMeta(intent?.from?.chain || "", intent?.from?.token || "") &&
+    tokenMeta(intent?.to?.chain || "", intent?.to?.token || "")
+  );
+}
+
 function realExecutionSupport(intent = {}) {
   const fromChain = getChain(intent?.from?.chain || "");
+  const toChain = getChain(intent?.to?.chain || "");
   const providerKey = String(intent?.execution?.providerKey || "").toLowerCase();
-  if (fromChain.family === "EVM") return { supported: true, reason: "" };
-  if (fromChain.family === "SVM" && ["jumper", "mayan"].includes(providerKey)) {
+  if (!providerKey) {
+    return {
+      supported: false,
+      reason: "No execution provider is selected for this route.",
+    };
+  }
+  if (providerKey === "across") {
+    if (
+      fromChain.family === "EVM" &&
+      toChain.family === "EVM" &&
+      isAcrossChain(intent?.from?.chain) &&
+      isAcrossChain(intent?.to?.chain) &&
+      hasIntentTokenMeta(intent)
+    ) {
+      return { supported: true, reason: "" };
+    }
+    return {
+      supported: false,
+      reason: "Across execution is available only on the current core EVM set with mapped tokens.",
+    };
+  }
+  if (providerKey === "relay") {
+    if (isRelayChain(intent?.from?.chain) && isRelayChain(intent?.to?.chain) && hasIntentTokenMeta(intent)) {
+      if (fromChain.family === "TVM") {
+        return {
+          supported: true,
+          reason: "Experimental Tron source execution path enabled via Relay quote transaction payloads.",
+        };
+      }
+      return { supported: true, reason: "" };
+    }
+    return {
+      supported: false,
+      reason: "Relay execution is only enabled for chains and tokens currently exposed by Relay's executable quote API.",
+    };
+  }
+  if (providerKey === "debridge") {
+    if (fromChain.family === "EVM" && toChain.family === "EVM" && hasIntentTokenMeta(intent)) {
+      if (shouldUseDirectDebridge(intent)) {
+        return {
+          supported: true,
+          reason: "Direct deBridge execution is enabled for this EVM route.",
+        };
+      }
+      if (isLifiChain(intent?.from?.chain) && isLifiChain(intent?.to?.chain)) {
+        return { supported: true, reason: "" };
+      }
+    }
+    return {
+      supported: false,
+      reason: "deBridge execution is only enabled for mapped EVM routes and the direct adapters currently wired in the backend.",
+    };
+  }
+  if (fromChain.family === "SVM" && ["jumper", "mayan"].includes(providerKey) && isLifiChain(intent?.from?.chain) && isLifiChain(intent?.to?.chain) && hasIntentTokenMeta(intent)) {
     return {
       supported: true,
       reason: "Experimental Solana source execution path enabled via LI.FI-compatible Solana transaction payloads.",
     };
   }
-  if (fromChain.family === "TVM" && providerKey === "relay") {
-    return {
-      supported: true,
-      reason: "Experimental Tron source execution path enabled via Relay quote transaction payloads.",
-    };
+  if (fromChain.family === "EVM" && ["jumper", "mayan"].includes(providerKey) && isLifiChain(intent?.from?.chain) && isLifiChain(intent?.to?.chain) && hasIntentTokenMeta(intent)) {
+    return { supported: true, reason: "" };
   }
   return {
     supported: false,
-    reason: `${fromChain.name} source routes are quote-only right now. Real execution is currently implemented for EVM sources, selected Solana routes, and Relay-backed Tron routes only.`,
+    reason: `${fromChain.name} -> ${toChain.name} is quote-only with the current provider adapter set.`,
   };
 }
 
@@ -870,7 +1140,7 @@ async function prepareLifiSwap(intent, payload) {
     fromAmount: amountRaw,
     fromAddress,
     toAddress: String(intent.to.recipient || "").trim() || fromAddress,
-    slippage: String(Math.max(0.1, Number(payload?.slippage || 0.5))),
+    slippage: String(Math.max(MIN_SLIPPAGE, Number(payload?.slippage || 0.5))),
   });
   const allowed = bridgeAllowList(intent.execution?.providerKey);
   if (allowed.length) params.set("allowBridges", allowed.join(","));
@@ -933,8 +1203,8 @@ async function prepareLifiSwap(intent, payload) {
 }
 
 async function prepareAcrossSwap(intent, payload) {
-  const fromChainId = evmChainId(intent.from.chain);
-  const toChainId = evmChainId(intent.to.chain);
+  const fromChainId = acrossChainId(intent.from.chain);
+  const toChainId = acrossChainId(intent.to.chain);
   if (!fromChainId || !toChainId) throw new Error("Across supports only EVM routes");
   const fromToken = tokenMeta(intent.from.chain, intent.from.token);
   const toToken = tokenMeta(intent.to.chain, intent.to.token);
@@ -1021,6 +1291,103 @@ async function prepareRelaySwap(intent, payload) {
     routeId: String(quote?.details?.requestId || quote?.requestId || requestId || ""),
     requestId,
     statusUrl,
+    raw: quote,
+  };
+}
+
+function debridgeHeaders() {
+  return {
+    Accept: "application/json",
+  };
+}
+
+function summarizeDebridgeQuote(intent, quote) {
+  const outputMeta = tokenMeta(intent.to.chain, intent.to.token);
+  const inputUsd = asNum(
+    quote?.estimation?.srcChainTokenIn?.approximateUsdValue ??
+    quote?.estimation?.srcChainTokenInAmountUsd ??
+    0,
+    0
+  );
+  const outputUsd = asNum(
+    quote?.estimation?.dstChainTokenOut?.recommendedApproximateUsdValue ??
+    quote?.estimation?.dstChainTokenOut?.approximateUsdValue ??
+    quote?.estimation?.dstChainTokenOutAmountUsd ??
+    0,
+    0
+  );
+  const expectedOutput = outputMeta
+    ? formatUnitsHuman(
+        quote?.estimation?.dstChainTokenOut?.recommendedAmount ??
+        quote?.estimation?.dstChainTokenOut?.amount ??
+        0,
+        outputMeta.decimals
+      )
+    : 0;
+  const minOutput = outputMeta
+    ? formatUnitsHuman(
+        quote?.estimation?.dstChainTokenOut?.amount ??
+        quote?.estimation?.dstChainTokenOut?.recommendedAmount ??
+        0,
+        outputMeta.decimals
+      )
+    : 0;
+  const providerFeeUsd = Math.max(0, inputUsd - outputUsd);
+  return {
+    provider: "deBridge",
+    providerKey: "debridge",
+    providerFeeUsd,
+    providerFeePct: inputUsd > 0 ? (providerFeeUsd / inputUsd) * 100 : 0,
+    expectedOutput,
+    minOutput,
+    estimatedDurationSec: asNum(quote?.estimation?.recommendedOrderTTL ?? 0, 0),
+  };
+}
+
+async function prepareDebridgeSwap(intent, payload) {
+  const srcChainId = debridgeChainId(intent.from.chain);
+  const dstChainId = debridgeChainId(intent.to.chain);
+  if (!srcChainId || !dstChainId) {
+    throw new Error(`deBridge direct adapter does not support ${intent.from.chain} -> ${intent.to.chain}`);
+  }
+  const srcToken = tokenMeta(intent.from.chain, intent.from.token);
+  const dstToken = tokenMeta(intent.to.chain, intent.to.token);
+  if (!srcToken || !dstToken) {
+    throw new Error(`deBridge token mapping missing for ${intent.from.chain}:${intent.from.token} or ${intent.to.chain}:${intent.to.token}`);
+  }
+  const fromAddress = requireSourceAddress(payload);
+  const recipient = String(intent.to.recipient || "").trim() || fromAddress;
+  const amount = parseUnitsHuman(intent.execution?.swapAmountAfterTax ?? intent.from.amount, srcToken.decimals);
+  const params = new URLSearchParams({
+    srcChainId: String(srcChainId),
+    srcChainTokenIn: srcToken.address,
+    srcChainTokenInAmount: amount,
+    dstChainId: String(dstChainId),
+    dstChainTokenOut: dstToken.address,
+    dstChainTokenOutAmount: "auto",
+    dstChainTokenOutRecipient: recipient,
+    srcChainOrderAuthorityAddress: fromAddress,
+    dstChainOrderAuthorityAddress: recipient,
+    srcChainRefundAddress: fromAddress,
+    senderAddress: fromAddress,
+    enableEstimate: "true",
+    prependOperatingExpenses: "true",
+    affiliateFeePercent: "0",
+  });
+  const quote = await fetchJsonCached(
+    `${DEBRIDGE_BASE_URL}/v1.0/dln/order/create-tx?${params.toString()}`,
+    LI_FI_QUOTE_CACHE_TTL_MS,
+    DEBRIDGE_QUOTE_CACHE
+  );
+  const tx = quote?.tx;
+  if (!tx?.to) throw new Error("deBridge create-tx did not return executable transaction");
+  return {
+    provider: "deBridge",
+    providerKey: "debridge",
+    kind: "evm",
+    tx,
+    routeId: String(quote?.orderId || quote?.estimation?.orderId || "").trim(),
+    orderId: String(quote?.orderId || quote?.estimation?.orderId || "").trim(),
     raw: quote,
   };
 }
@@ -1150,6 +1517,10 @@ async function buildLiveRoutePreview(route, payload) {
     const prepared = await prepareAcrossSwap(intent, { ...payload, fromAddress });
     return summarizeAcrossQuote(intent, prepared.raw);
   }
+  if (route.key === "debridge" && shouldUseDirectDebridge(intent)) {
+    const prepared = await prepareDebridgeSwap(intent, { ...payload, fromAddress });
+    return summarizeDebridgeQuote(intent, prepared.raw);
+  }
   if (route.key === "relay") {
     const prepared = await prepareRelaySwap(intent, { ...payload, fromAddress });
     return summarizeRelayQuote(intent, prepared.raw);
@@ -1175,6 +1546,9 @@ async function prepareRealExecution(payload = {}) {
       throw new Error(`Provider ${providerKey} did not return an executable payload for ${intent.from.chain} source`);
     }
     return { intent, execution };
+  }
+  if (providerKey === "debridge" && shouldUseDirectDebridge(intent)) {
+    return { intent, execution: await prepareDebridgeSwap(intent, payload) };
   }
   if (providerKey === "jumper" || providerKey === "mayan" || providerKey === "debridge") {
     const execution = await prepareLifiSwap(intent, payload);
@@ -1210,6 +1584,43 @@ async function refreshOrderStatus(order) {
   if (!order?.sourceTxHash) return order;
 
   const providerKey = String(order?.preparedExecution?.providerKey || "").toLowerCase();
+  if (providerKey === "debridge" && order?.preparedExecution?.orderId) {
+    try {
+      const status = await fetchJson(`${DEBRIDGE_STATUS_BASE_URL}/${encodeURIComponent(order.preparedExecution.orderId)}/status`, {
+        headers: debridgeHeaders(),
+      });
+      const bridgeStatus = String(status?.orderState || status?.status || "").toLowerCase();
+      if (["fulfilled", "sentunlock", "claimedunlock"].includes(bridgeStatus)) {
+        order.status = "completed";
+        order.steps = [
+          { key: "tax", status: order.taxTxHash ? "completed" : "pending", note: "Tax transfer status stored", txHash: order.taxTxHash || "" },
+          { key: "crosschain", status: "completed", note: "deBridge order completed on-chain", txHash: order.sourceTxHash },
+        ];
+        return order;
+      }
+      if (["cancelled", "canceled", "refunded", "failed", "sentcancel"].includes(bridgeStatus)) {
+        order.status = "failed";
+        order.steps = [
+          { key: "tax", status: order.taxTxHash ? "completed" : "pending", note: "Tax transfer status stored", txHash: order.taxTxHash || "" },
+          { key: "crosschain", status: "failed", note: status?.orderState || status?.status || "deBridge reported failure", txHash: order.sourceTxHash },
+        ];
+        return order;
+      }
+      order.status = "processing";
+      order.steps = [
+        { key: "tax", status: order.taxTxHash ? "completed" : "pending", note: "Tax transfer status stored", txHash: order.taxTxHash || "" },
+        { key: "crosschain", status: "processing", note: status?.orderState || status?.status || "Waiting deBridge settlement", txHash: order.sourceTxHash },
+      ];
+      return order;
+    } catch (err) {
+      order.status = "processing";
+      order.steps = [
+        { key: "tax", status: order.taxTxHash ? "completed" : "pending", note: "Tax transfer status stored", txHash: order.taxTxHash || "" },
+        { key: "crosschain", status: "processing", note: `deBridge status check pending: ${err.message}`, txHash: order.sourceTxHash },
+      ];
+      return order;
+    }
+  }
   if (providerKey === "relay") {
     try {
       const statusUrl = normalizeRelayCheckUrl(
