@@ -610,6 +610,12 @@ async function buildTaxIntent(payload = {}) {
   const route = await buildRoute(payload);
   const q = route.quote;
   const recipient = String(payload.recipient || "").trim();
+  const executionSupport = q.fromChain.family === "EVM"
+    ? { supported: true, reason: "" }
+    : {
+        supported: false,
+        reason: `Real execution is currently available only for EVM source chains. ${q.fromChain.name} source routes are quote-only right now.`,
+      };
   const taxStep = [
     "STEP 1 - TAX TRANSFER",
     `From Chain: ${q.fromChain.name}`,
@@ -655,6 +661,8 @@ async function buildTaxIntent(payload = {}) {
       providerEstimatedFeePct: route.estProviderFeePct,
       url: route.url,
       note: route.note,
+      realExecutionSupported: executionSupport.supported,
+      realExecutionReason: executionSupport.reason,
       swapAmountAfterTax: Number(q.amountAfterTaxOnly.toFixed(8)),
       taxStep,
     },
@@ -706,6 +714,15 @@ function shouldRetryUnrestrictedLifi(intent) {
   const fromFamily = getChain(intent?.from?.chain).family;
   const toFamily = getChain(intent?.to?.chain).family;
   return fromFamily !== "EVM" || toFamily !== "EVM";
+}
+
+function realExecutionSupport(intent = {}) {
+  const fromChain = getChain(intent?.from?.chain || "");
+  if (fromChain.family === "EVM") return { supported: true, reason: "" };
+  return {
+    supported: false,
+    reason: `Real execution is currently available only for EVM source chains. ${fromChain.name} source routes are quote-only right now.`,
+  };
 }
 
 function requireSourceAddress(payload) {
@@ -935,6 +952,8 @@ async function buildLiveRoutePreview(route, payload) {
 async function prepareRealExecution(payload = {}) {
   const incomingIntent = payload?.intent && typeof payload.intent === "object" ? payload.intent : null;
   const intent = incomingIntent || await buildTaxIntent(payload);
+  const executionSupport = realExecutionSupport(intent);
+  if (!executionSupport.supported) throw new Error(executionSupport.reason);
   const providerKey = String(intent.execution?.providerKey || "").toLowerCase();
   if (!providerKey) throw new Error("Missing execution provider");
   if (providerKey === "across") return { intent, execution: await prepareAcrossSwap(intent, payload) };
