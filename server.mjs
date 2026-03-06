@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = normalize(__dirname);
 const PORT = Number(process.env.PORT || 8080);
+const CHANGENOW_API_KEY = String(process.env.CHANGENOW_API_KEY || "").trim();
+const SIMPLESWAP_API_KEY = String(process.env.SIMPLESWAP_API_KEY || "").trim();
 
 const CHAINS = [
   { id: "ethereum", name: "Ethereum", family: "EVM" },
@@ -16,7 +18,7 @@ const CHAINS = [
   { id: "optimism", name: "Optimism", family: "EVM" },
   { id: "base", name: "Base", family: "EVM" },
   { id: "avalanche", name: "Avalanche C-Chain", family: "EVM" },
-  { id: "fantom", name: "Fantom", family: "EVM" },
+  { id: "sonic", name: "Sonic", family: "EVM" },
   { id: "zksync", name: "zkSync Era", family: "EVM" },
   { id: "linea", name: "Linea", family: "EVM" },
   { id: "solana", name: "Solana", family: "SVM" },
@@ -32,10 +34,25 @@ const TOKENS = [
   { id: "ETH", usd: 3200 },
   { id: "MATIC", usd: 0.95 },
   { id: "AVAX", usd: 42 },
+  { id: "S", usd: 0.05 },
   { id: "SOL", usd: 140 },
   { id: "TRX", usd: 0.13 },
   { id: "XRP", usd: 0.62 },
 ];
+const STATIC_TOKEN_USD = Object.fromEntries(TOKENS.map((token) => [token.id, token.usd]));
+const MARKET_PRICE_IDS = {
+  USDT: "tether",
+  USDC: "usd-coin",
+  BNB: "binancecoin",
+  ETH: "ethereum",
+  MATIC: "matic-network",
+  AVAX: "avalanche-2",
+  S: "sonic-3",
+  SOL: "solana",
+  TRX: "tron",
+  XRP: "ripple",
+};
+const MARKET_PRICE_TTL_MS = 60_000;
 
 const DEFAULT_CFG = {
   taxPercent: 0.15,
@@ -49,7 +66,7 @@ const DEFAULT_CFG = {
     optimism: "0xTaxOpTreasury0000000000000000000000001",
     base: "0xTaxBaseTreasury000000000000000000000001",
     avalanche: "0xTaxAvaxTreasury0000000000000000000001",
-    fantom: "0xTaxFtmTreasury000000000000000000000001",
+    sonic: "0xTaxSonicTreasury00000000000000000000001",
     zksync: "0xTaxZkTreasury00000000000000000000000001",
     linea: "0xTaxLineaTreasury00000000000000000000001",
     solana: "So1TaxWallet11111111111111111111111111111111",
@@ -160,6 +177,11 @@ const MIME = {
   ".webmanifest": "application/manifest+json",
 };
 const SWAP_ORDERS = new Map();
+const MARKET_PRICE_CACHE = {
+  updatedAt: 0,
+  source: "static",
+  prices: { ...STATIC_TOKEN_USD },
+};
 const LI_FI_BASE_URL = "https://li.quest/v1";
 const DEBRIDGE_BASE_URL = "https://dln.debridge.finance";
 const DEBRIDGE_STATUS_BASE_URL = "https://stats-api.dln.trade/api/Orders";
@@ -172,7 +194,7 @@ const EVM_CHAIN_IDS = {
   optimism: 10,
   base: 8453,
   avalanche: 43114,
-  fantom: 250,
+  sonic: 146,
   zksync: 324,
   linea: 59144,
 };
@@ -216,6 +238,11 @@ const TOKEN_META = {
     USDT: { address: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7", decimals: 6 },
     USDC: { address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", decimals: 6 },
   },
+  sonic: {
+    S: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDT: { address: "0x6047828dc181963ba44974801ff68e538da5eaf9", decimals: 6 },
+    USDC: { address: "0x29219dd400f2Bf60E5a23d13Be72B486D4038894", decimals: 6 },
+  },
   solana: {
     SOL: { address: "11111111111111111111111111111111", decimals: 9 },
     USDC: { address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
@@ -254,8 +281,10 @@ function getChain(id) {
   return CHAINS.find((c) => c.id === id) || CHAINS[0];
 }
 
-function getToken(id) {
-  return TOKENS.find((t) => t.id === id) || TOKENS[0];
+function getToken(id, prices = null) {
+  const token = TOKENS.find((t) => t.id === id) || TOKENS[0];
+  const usd = prices && prices[token.id] != null ? asNum(prices[token.id], token.usd) : token.usd;
+  return { ...token, usd };
 }
 
 function getConfig(input = {}) {
@@ -267,13 +296,49 @@ function getConfig(input = {}) {
   };
 }
 
-function computeQuote(payload = {}) {
+async function fetchLiveMarketPrices() {
+  const ids = Array.from(new Set(Object.values(MARKET_PRICE_IDS)));
+  const params = new URLSearchParams({
+    ids: ids.join(","),
+    vs_currencies: "usd",
+  });
+  const data = await fetchJson(`https://api.coingecko.com/api/v3/simple/price?${params.toString()}`);
+  const prices = { ...STATIC_TOKEN_USD };
+  Object.entries(MARKET_PRICE_IDS).forEach(([symbol, id]) => {
+    const usd = asNum(data?.[id]?.usd, 0);
+    if (usd > 0) prices[symbol] = usd;
+  });
+  return prices;
+}
+
+async function getMarketPrices(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && MARKET_PRICE_CACHE.updatedAt && now - MARKET_PRICE_CACHE.updatedAt < MARKET_PRICE_TTL_MS) {
+    return { ...MARKET_PRICE_CACHE.prices };
+  }
+  try {
+    const prices = await fetchLiveMarketPrices();
+    MARKET_PRICE_CACHE.prices = prices;
+    MARKET_PRICE_CACHE.updatedAt = now;
+    MARKET_PRICE_CACHE.source = "coingecko";
+  } catch (_) {
+    if (!MARKET_PRICE_CACHE.updatedAt) {
+      MARKET_PRICE_CACHE.updatedAt = now;
+      MARKET_PRICE_CACHE.prices = { ...STATIC_TOKEN_USD };
+    }
+    MARKET_PRICE_CACHE.source = MARKET_PRICE_CACHE.source || "static";
+  }
+  return { ...MARKET_PRICE_CACHE.prices };
+}
+
+async function computeQuote(payload = {}) {
   const config = getConfig(payload.config);
   const amountIn = Math.max(0, asNum(payload.amount, 0));
   const slippagePct = Math.max(0, asNum(payload.slippage, 0.5));
+  const prices = await getMarketPrices(Boolean(payload.forcePriceRefresh));
 
-  const fromToken = getToken(payload.fromToken);
-  const toToken = getToken(payload.toToken);
+  const fromToken = getToken(payload.fromToken, prices);
+  const toToken = getToken(payload.toToken, prices);
   const fromChain = getChain(payload.fromChain);
   const toChain = getChain(payload.toChain);
 
@@ -310,11 +375,14 @@ function computeQuote(payload = {}) {
     totalInternalPct: config.taxPercent + config.protocolFee + dynamicBridgePct,
     taxWallet: config.taxWallets[fromChain.id] || "Not configured",
     config,
+    marketPrices: prices,
+    pricesUpdatedAt: MARKET_PRICE_CACHE.updatedAt,
+    priceSource: MARKET_PRICE_CACHE.source,
   };
 }
 
-function buildRoute(payload = {}) {
-  const quote = computeQuote(payload);
+async function buildRoute(payload = {}) {
+  const quote = await computeQuote(payload);
   const supported = AUTO_PROVIDERS.filter((provider) => {
     try {
       return provider.supports(quote);
@@ -327,7 +395,7 @@ function buildRoute(payload = {}) {
     curr.estFeePct < prev.estFeePct ? curr : prev
   );
 
-  return {
+  const route = {
     provider: best.label,
     key: best.key,
     estProviderFeePct: best.estFeePct,
@@ -335,10 +403,16 @@ function buildRoute(payload = {}) {
     note: best.note,
     quote,
   };
+  try {
+    route.live = await buildLiveRoutePreview(route, payload);
+  } catch (_) {
+    route.live = null;
+  }
+  return route;
 }
 
-function buildTaxIntent(payload = {}) {
-  const route = buildRoute(payload);
+async function buildTaxIntent(payload = {}) {
+  const route = await buildRoute(payload);
   const q = route.quote;
   const recipient = String(payload.recipient || "").trim();
   const taxStep = [
@@ -404,6 +478,18 @@ function parseUnitsHuman(value, decimals) {
   return (BigInt(whole) * (10n ** BigInt(decimals)) + BigInt(frac || "0")).toString();
 }
 
+function formatUnitsHuman(value, decimals) {
+  try {
+    const raw = BigInt(String(value ?? "0"));
+    const base = 10n ** BigInt(decimals);
+    const whole = raw / base;
+    const frac = (raw % base).toString().padStart(decimals, "0").replace(/0+$/, "");
+    return Number(frac ? `${whole}.${frac}` : whole.toString());
+  } catch {
+    return 0;
+  }
+}
+
 function tokenMeta(chainId, tokenId) {
   return TOKEN_META[chainId]?.[tokenId] || null;
 }
@@ -425,6 +511,10 @@ function requireSourceAddress(payload) {
   const fromAddress = String(payload?.fromAddress || payload?.sourceAddress || payload?.intent?.execution?.sourceAddress || "").trim();
   if (!fromAddress) throw new Error("Source wallet address is required for real cross-chain execution");
   return fromAddress;
+}
+
+function sourceAddressOrEmpty(payload) {
+  return String(payload?.fromAddress || payload?.sourceAddress || payload?.intent?.execution?.sourceAddress || "").trim();
 }
 
 async function fetchJson(url, options = {}) {
@@ -506,9 +596,91 @@ async function prepareAcrossSwap(intent, payload) {
   };
 }
 
+function summarizeLifiQuote(intent, quote) {
+  const feeCosts = Array.isArray(quote?.estimate?.feeCosts) ? quote.estimate.feeCosts : [];
+  const gasCosts = Array.isArray(quote?.estimate?.gasCosts) ? quote.estimate.gasCosts : [];
+  const providerFeeUsd = [...feeCosts, ...gasCosts].reduce((sum, item) => sum + asNum(item?.amountUSD, 0), 0);
+  const toMeta = tokenMeta(intent.to.chain, intent.to.token);
+  const expectedOutput = toMeta ? formatUnitsHuman(quote?.estimate?.toAmount || 0, toMeta.decimals) : 0;
+  const minOutput = toMeta ? formatUnitsHuman(quote?.estimate?.toAmountMin || 0, toMeta.decimals) : 0;
+  const fromAmountUsd = asNum(quote?.estimate?.fromAmountUSD, 0);
+  return {
+    provider: "LI.FI",
+    providerKey: intent.execution?.providerKey || "jumper",
+    providerFeeUsd,
+    providerFeePct: fromAmountUsd > 0 ? (providerFeeUsd / fromAmountUsd) * 100 : 0,
+    expectedOutput,
+    minOutput,
+    estimatedDurationSec: asNum(quote?.estimate?.executionDuration, 0),
+  };
+}
+
+function summarizeAcrossQuote(intent, quote) {
+  const toMeta = tokenMeta(intent.to.chain, intent.to.token);
+  const expectedOutput = toMeta
+    ? formatUnitsHuman(
+        quote?.expectedOutputAmount || quote?.expectedOutputTokenAmount || quote?.outputAmount || 0,
+        toMeta.decimals
+      )
+    : 0;
+  const minOutput = toMeta
+    ? formatUnitsHuman(
+        quote?.minOutputAmount || quote?.minDepositOutputAmount || quote?.expectedOutputAmount || 0,
+        toMeta.decimals
+      )
+    : 0;
+  const feeUsd = asNum(quote?.totalRelayFee?.totalUsd, 0)
+    || asNum(quote?.fees?.total?.usd, 0)
+    || asNum(quote?.fees?.relayerCapital?.usd, 0)
+    || asNum(quote?.fees?.lp?.usd, 0);
+  const inputUsd = asNum(quote?.inputAmountUsd, 0) || asNum(quote?.expectedInputAmountUsd, 0);
+  return {
+    provider: "Across",
+    providerKey: "across",
+    providerFeeUsd: feeUsd,
+    providerFeePct: inputUsd > 0 ? (feeUsd / inputUsd) * 100 : 0,
+    expectedOutput,
+    minOutput,
+    estimatedDurationSec: asNum(quote?.expectedFillTimeSec, 0) || asNum(quote?.estimatedFillTimeSec, 0),
+  };
+}
+
+async function buildLiveRoutePreview(route, payload) {
+  const fromAddress = sourceAddressOrEmpty(payload);
+  if (!fromAddress) return null;
+  const q = route.quote;
+  const recipient = String(payload.recipient || "").trim() || fromAddress;
+  const intent = {
+    from: {
+      chain: q.fromChain.id,
+      token: q.fromToken.id,
+      amount: q.amountIn,
+    },
+    to: {
+      chain: q.toChain.id,
+      token: q.toToken.id,
+      recipient,
+      minAmountOut: Number(q.minOut.toFixed(8)),
+    },
+    execution: {
+      providerKey: route.key,
+      swapAmountAfterTax: Number(q.amountAfterTaxOnly.toFixed(8)),
+    },
+  };
+  if (route.key === "across") {
+    const prepared = await prepareAcrossSwap(intent, { ...payload, fromAddress });
+    return summarizeAcrossQuote(intent, prepared.raw);
+  }
+  if (["relay", "jumper", "mayan", "debridge"].includes(route.key)) {
+    const prepared = await prepareLifiSwap(intent, { ...payload, fromAddress });
+    return summarizeLifiQuote(intent, prepared.raw);
+  }
+  return null;
+}
+
 async function prepareRealExecution(payload = {}) {
   const incomingIntent = payload?.intent && typeof payload.intent === "object" ? payload.intent : null;
-  const intent = incomingIntent || buildTaxIntent(payload);
+  const intent = incomingIntent || await buildTaxIntent(payload);
   const providerKey = String(intent.execution?.providerKey || "").toLowerCase();
   if (!providerKey) throw new Error("Missing execution provider");
   if (providerKey === "across") return { intent, execution: await prepareAcrossSwap(intent, payload) };
@@ -671,19 +843,39 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && pathname === "/api/health") {
-      json(res, 200, { ok: true, service: "pshibdex-local-api" });
+      json(res, 200, {
+        ok: true,
+        service: "pshibdex-local-api",
+        marketPricesUpdatedAt: MARKET_PRICE_CACHE.updatedAt || null,
+        marketPriceSource: MARKET_PRICE_CACHE.source,
+        providerKeys: {
+          changenow: Boolean(CHANGENOW_API_KEY),
+          simpleswap: Boolean(SIMPLESWAP_API_KEY),
+        },
+      });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/market-prices") {
+      const prices = await getMarketPrices(reqUrl.searchParams.get("refresh") === "1");
+      json(res, 200, {
+        ok: true,
+        source: MARKET_PRICE_CACHE.source,
+        updatedAt: MARKET_PRICE_CACHE.updatedAt,
+        prices,
+      });
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/quote") {
       const body = await readJsonBody(req);
-      json(res, 200, { ok: true, quote: computeQuote(body) });
+      json(res, 200, { ok: true, quote: await computeQuote(body) });
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/route") {
       const body = await readJsonBody(req);
-      const route = buildRoute(body);
+      const route = await buildRoute(body);
       json(res, 200, {
         ok: true,
         route: {
@@ -692,6 +884,7 @@ const server = createServer(async (req, res) => {
           estProviderFeePct: route.estProviderFeePct,
           url: route.url,
           note: route.note,
+          live: route.live || null,
         },
         quote: route.quote,
       });
@@ -700,7 +893,7 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && pathname === "/api/tax-intent") {
       const body = await readJsonBody(req);
-      const intent = buildTaxIntent(body);
+      const intent = await buildTaxIntent(body);
       json(res, 200, { ok: true, intent });
       return;
     }
