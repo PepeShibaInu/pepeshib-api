@@ -753,8 +753,24 @@ async function prepareLifiSwap(intent, payload) {
   try {
     quote = await fetchJson(`${LI_FI_BASE_URL}/quote?${params.toString()}`);
   } catch (err) {
+    console.error("[PepeShibDex] LI.FI quote failed", {
+      fromChain: intent?.from?.chain,
+      toChain: intent?.to?.chain,
+      fromToken: intent?.from?.token,
+      toToken: intent?.to?.token,
+      providerKey: intent?.execution?.providerKey || "",
+      allowedBridges: allowed,
+      error: err?.message || String(err),
+    });
     if (!allowed.length || !shouldRetryUnrestrictedLifi(intent)) throw err;
     params.delete("allowBridges");
+    console.warn("[PepeShibDex] Retrying LI.FI quote without allowBridges", {
+      fromChain: intent?.from?.chain,
+      toChain: intent?.to?.chain,
+      fromToken: intent?.from?.token,
+      toToken: intent?.to?.token,
+      providerKey: intent?.execution?.providerKey || "",
+    });
     quote = await fetchJson(`${LI_FI_BASE_URL}/quote?${params.toString()}`);
     quote._pshibdexBridgeFallback = "unrestricted";
   }
@@ -1043,10 +1059,12 @@ const server = createServer(async (req, res) => {
 
   const reqUrl = new URL(req.url, `http://${req.headers.host}`);
   const { pathname } = reqUrl;
+  const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
   try {
     if (pathname.startsWith("/api/")) {
       applyCors(req, res);
+      console.log("[PepeShibDex] API request", { requestId, method: req.method, pathname });
     }
 
     if (req.method === "GET" && pathname === "/api/health") {
@@ -1109,9 +1127,32 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && pathname === "/api/execute-swap") {
       const body = await readJsonBody(req);
-      const { intent, execution } = await prepareRealExecution(body);
-      const order = createSwapOrder(intent, execution);
-      json(res, 200, { ok: true, swap: order });
+      console.log("[PepeShibDex] execute-swap:start", {
+        requestId,
+        fromChain: body?.intent?.from?.chain || body?.fromChain || "",
+        toChain: body?.intent?.to?.chain || body?.toChain || "",
+        fromToken: body?.intent?.from?.token || body?.fromToken || "",
+        toToken: body?.intent?.to?.token || body?.toToken || "",
+        fromAddress: String(body?.fromAddress || "").trim(),
+      });
+      try {
+        const { intent, execution } = await prepareRealExecution(body);
+        const order = createSwapOrder(intent, execution);
+        console.log("[PepeShibDex] execute-swap:success", {
+          requestId,
+          orderId: order.id,
+          providerKey: execution?.providerKey || "",
+          kind: execution?.kind || "",
+        });
+        json(res, 200, { ok: true, swap: order });
+      } catch (err) {
+        console.error("[PepeShibDex] execute-swap:failed", {
+          requestId,
+          error: err?.message || String(err),
+          stack: err?.stack || "",
+        });
+        throw err;
+      }
       return;
     }
 
@@ -1146,6 +1187,13 @@ const server = createServer(async (req, res) => {
 
     await serveFile(req, res);
   } catch (err) {
+    console.error("[PepeShibDex] request failed", {
+      requestId,
+      method: req.method,
+      pathname,
+      error: err instanceof Error ? err.message : "Unknown error",
+      stack: err instanceof Error ? err.stack : "",
+    });
     json(res, 500, {
       ok: false,
       error: "SERVER_ERROR",
