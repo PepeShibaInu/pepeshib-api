@@ -145,11 +145,11 @@ const AUTO_PROVIDERS = [
     label: "deBridge",
     estFeePct: 0.04,
     supports: (q) =>
-      ["EVM", "SVM", "TVM"].includes(q.fromChain.family) &&
-      ["EVM", "SVM", "TVM"].includes(q.toChain.family) &&
+      q.fromChain.family === "EVM" &&
+      q.toChain.family === "EVM" &&
       q.fromChain.id !== q.toChain.id,
     url: () => "https://app.debridge.finance/",
-    note: "Auto-selected route optimized for broad chain coverage. Verify route details in checkout.",
+    note: "Auto-selected deBridge route for EVM bridge flow. Verify route details in checkout.",
   },
   {
     key: "mayan",
@@ -179,9 +179,10 @@ const AUTO_PROVIDERS = [
     estFeePct: 0.2,
     supports: (q) =>
       ["EVM", "SVM"].includes(q.fromChain.family) &&
-      ["EVM", "SVM"].includes(q.toChain.family),
+      ["EVM", "SVM"].includes(q.toChain.family) &&
+      q.fromChain.id !== q.toChain.id,
     url: () => "https://jumper.exchange/",
-    note: "Auto-selected aggregator route. Verify route details in checkout.",
+    note: "Auto-selected LI.FI aggregator route for EVM/Solana flow. Verify route details in checkout.",
   },
   {
     key: "changenow",
