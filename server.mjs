@@ -238,8 +238,11 @@ const AUTO_PROVIDERS = [
       q.fromChain.family === "EVM" &&
       q.toChain.family === "EVM" &&
       q.fromChain.id !== q.toChain.id &&
-      isLifiChain(q.fromChain.id) &&
-      isLifiChain(q.toChain.id),
+      (
+        (isLifiChain(q.fromChain.id) && isLifiChain(q.toChain.id)) ||
+        isDebridgeDirectChain(q.fromChain.id) ||
+        isDebridgeDirectChain(q.toChain.id)
+      ),
     url: () => "https://app.debridge.finance/",
     note: "Auto-selected deBridge route for EVM bridge flow. Verify route details in checkout.",
   },
@@ -309,6 +312,8 @@ const AUTO_PROVIDERS = [
     note: "Set source/destination networks to match selected chains before confirming.",
   },
 ];
+
+const EXECUTABLE_AUTO_PROVIDER_KEYS = new Set(["across", "debridge", "mayan", "relay", "jumper"]);
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -818,7 +823,10 @@ async function buildRoute(payload = {}) {
       return false;
     }
   });
-  const candidates = supported.length ? supported : AUTO_PROVIDERS;
+  const candidates = supported.filter((provider) => EXECUTABLE_AUTO_PROVIDER_KEYS.has(provider.key));
+  if (!candidates.length) {
+    throw new Error(`No real provider-backed route is available yet for ${quote.fromChain.name} ${quote.fromToken.id} -> ${quote.toChain.name} ${quote.toToken.id}`);
+  }
   const forcedDirectDebridge = shouldPreferDirectDebridgeRoute(quote)
     ? candidates.find((provider) => provider.key === "debridge")
     : null;
