@@ -210,12 +210,6 @@ function shouldUseDirectDebridge(intent = {}) {
   );
 }
 
-function shouldPreferDirectDebridgeRoute(quote) {
-  return quote?.fromChain?.family === "EVM" &&
-    quote?.toChain?.family === "EVM" &&
-    (isDebridgeDirectChain(quote?.fromChain?.id) || isDebridgeDirectChain(quote?.toChain?.id));
-}
-
 const AUTO_PROVIDERS = [
   {
     key: "across",
@@ -816,38 +810,55 @@ async function computeQuote(payload = {}) {
 
 async function buildRoute(payload = {}) {
   const quote = await computeQuote(payload);
-  const supported = AUTO_PROVIDERS.filter((provider) => {
-    try {
-      return provider.supports(quote);
-    } catch {
-      return false;
-    }
-  });
-  const candidates = supported.filter((provider) => EXECUTABLE_AUTO_PROVIDER_KEYS.has(provider.key));
+  const candidates = executableProvidersForQuote(quote);
   if (!candidates.length) {
     throw new Error(`No real provider-backed route is available yet for ${quote.fromChain.name} ${quote.fromToken.id} -> ${quote.toChain.name} ${quote.toToken.id}`);
   }
-  const forcedDirectDebridge = shouldPreferDirectDebridgeRoute(quote)
-    ? candidates.find((provider) => provider.key === "debridge")
-    : null;
-  const best = candidates.reduce((prev, curr) =>
-    curr.estFeePct < prev.estFeePct ? curr : prev
-  );
+  const orderedCandidates = [...candidates];
 
-  const route = {
-    provider: (forcedDirectDebridge || best).label,
-    key: (forcedDirectDebridge || best).key,
-    estProviderFeePct: (forcedDirectDebridge || best).estFeePct,
-    url: (forcedDirectDebridge || best).url(quote),
-    note: (forcedDirectDebridge || best).note,
+  const baseRouteFor = (provider) => ({
+    provider: provider.label,
+    key: provider.key,
+    estProviderFeePct: provider.estFeePct,
+    url: provider.url(quote),
+    note: provider.note,
     quote,
-  };
-  try {
-    route.live = await buildLiveRoutePreview(route, payload);
-  } catch (_) {
-    route.live = null;
+  });
+
+  let selectedRoute = baseRouteFor(orderedCandidates[0]);
+  let lastPreviewError = null;
+
+  if (sourceAddressOrEmpty(payload)) {
+    for (const provider of orderedCandidates) {
+      const candidateRoute = baseRouteFor(provider);
+      try {
+        candidateRoute.live = await buildLiveRoutePreview(candidateRoute, payload);
+        selectedRoute = candidateRoute;
+        return selectedRoute;
+      } catch (err) {
+        lastPreviewError = err;
+        console.warn("[PepeShibDex] buildRoute provider probe failed", {
+          providerKey: provider.key,
+          fromChain: quote?.fromChain?.id,
+          toChain: quote?.toChain?.id,
+          fromToken: quote?.fromToken?.id,
+          toToken: quote?.toToken?.id,
+          error: err?.message || String(err),
+        });
+      }
+    }
   }
-  return route;
+
+  try {
+    selectedRoute.live = await buildLiveRoutePreview(selectedRoute, payload);
+  } catch (err) {
+    selectedRoute.live = null;
+    lastPreviewError = lastPreviewError || err;
+  }
+  if (lastPreviewError && !selectedRoute.live) {
+    selectedRoute.note = `${selectedRoute.note} Auto Route will retry compatible providers during execution if this provider cannot execute the pair.`;
+  }
+  return selectedRoute;
 }
 
 async function buildTaxIntent(payload = {}) {
@@ -1090,6 +1101,54 @@ function realExecutionSupport(intent = {}) {
     supported: false,
     reason: `${fromChain.name} -> ${toChain.name} is quote-only with the current provider adapter set.`,
   };
+}
+
+function executionProviderByKey(providerKey) {
+  return AUTO_PROVIDERS.find((provider) => provider.key === providerKey) || null;
+}
+
+function executableProvidersForQuote(quote) {
+  const supported = AUTO_PROVIDERS.filter((provider) => {
+    try {
+      return provider.supports(quote);
+    } catch {
+      return false;
+    }
+  });
+  return supported
+    .filter((provider) => EXECUTABLE_AUTO_PROVIDER_KEYS.has(provider.key))
+    .sort((left, right) => left.estFeePct - right.estFeePct);
+}
+
+function executionCandidateKeys(intent = {}) {
+  const pseudoQuote = {
+    fromChain: getChain(intent?.from?.chain || ""),
+    toChain: getChain(intent?.to?.chain || ""),
+  };
+  const ordered = executableProvidersForQuote(pseudoQuote).map((provider) => provider.key);
+  const selected = String(intent?.execution?.providerKey || "").toLowerCase();
+  if (selected && ordered.includes(selected)) {
+    ordered.sort((left, right) => {
+      if (left === selected) return -1;
+      if (right === selected) return 1;
+      return 0;
+    });
+  }
+  return ordered;
+}
+
+async function prepareExecutionForProvider(intent, payload, providerKey) {
+  if (providerKey === "across") return await prepareAcrossSwap(intent, payload);
+  if (providerKey === "relay") return await prepareRelaySwap(intent, payload);
+  if (providerKey === "debridge" && shouldUseDirectDebridge(intent)) return await prepareDebridgeSwap(intent, payload);
+  if (providerKey === "jumper" || providerKey === "mayan" || providerKey === "debridge") {
+    const execution = await prepareLifiSwap(intent, payload);
+    if (!["evm", "solana"].includes(execution?.kind || "")) {
+      throw new Error(`Provider ${providerKey} did not return an executable payload for ${intent.from.chain} source`);
+    }
+    return execution;
+  }
+  throw new Error(`Provider ${providerKey} is not wired for real execution yet`);
 }
 
 function requireSourceAddress(payload) {
@@ -1555,29 +1614,42 @@ async function buildLiveRoutePreview(route, payload) {
 async function prepareRealExecution(payload = {}) {
   const incomingIntent = payload?.intent && typeof payload.intent === "object" ? payload.intent : null;
   const intent = incomingIntent || await buildTaxIntent(payload);
-  const executionSupport = realExecutionSupport(intent);
-  if (!executionSupport.supported) throw new Error(executionSupport.reason);
-  const providerKey = String(intent.execution?.providerKey || "").toLowerCase();
-  if (!providerKey) throw new Error("Missing execution provider");
-  if (providerKey === "across") return { intent, execution: await prepareAcrossSwap(intent, payload) };
-  if (providerKey === "relay") {
-    const execution = await prepareRelaySwap(intent, payload);
-    if (!["evm", "tron"].includes(execution?.kind || "")) {
-      throw new Error(`Provider ${providerKey} did not return an executable payload for ${intent.from.chain} source`);
+  const selectedProviderKey = String(intent.execution?.providerKey || "").toLowerCase();
+  if (!selectedProviderKey) throw new Error("Missing execution provider");
+  const candidates = executionCandidateKeys(intent);
+  let lastError = null;
+
+  for (const providerKey of candidates) {
+    const candidateIntent = structuredClone(intent);
+    const providerMeta = executionProviderByKey(providerKey);
+    candidateIntent.execution = {
+      ...(candidateIntent.execution || {}),
+      providerKey,
+      provider: providerMeta?.label || candidateIntent.execution?.provider || providerKey,
+    };
+    const executionSupport = realExecutionSupport(candidateIntent);
+    if (!executionSupport.supported) continue;
+    try {
+      const execution = await prepareExecutionForProvider(candidateIntent, payload, providerKey);
+      if (providerKey === "relay" && !["evm", "tron"].includes(execution?.kind || "")) {
+        throw new Error(`Provider ${providerKey} did not return an executable payload for ${candidateIntent.from.chain} source`);
+      }
+      return { intent: candidateIntent, execution };
+    } catch (err) {
+      lastError = err;
+      console.warn("[PepeShibDex] execution provider fallback", {
+        selectedProviderKey,
+        attemptedProviderKey: providerKey,
+        fromChain: candidateIntent?.from?.chain,
+        toChain: candidateIntent?.to?.chain,
+        fromToken: candidateIntent?.from?.token,
+        toToken: candidateIntent?.to?.token,
+        error: err?.message || String(err),
+      });
     }
-    return { intent, execution };
   }
-  if (providerKey === "debridge" && shouldUseDirectDebridge(intent)) {
-    return { intent, execution: await prepareDebridgeSwap(intent, payload) };
-  }
-  if (providerKey === "jumper" || providerKey === "mayan" || providerKey === "debridge") {
-    const execution = await prepareLifiSwap(intent, payload);
-    if (!["evm", "solana"].includes(execution?.kind || "")) {
-      throw new Error(`Provider ${providerKey} did not return an executable payload for ${intent.from.chain} source`);
-    }
-    return { intent, execution };
-  }
-  throw new Error(`Provider ${providerKey} is not wired for real execution yet`);
+
+  throw lastError || new Error(`No real execution provider succeeded for ${intent?.from?.chain} -> ${intent?.to?.chain}`);
 }
 
 function createSwapOrder(intent, execution) {
