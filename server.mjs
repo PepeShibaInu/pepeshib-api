@@ -213,7 +213,7 @@ function shouldUseDirectDebridge(intent = {}) {
 function shouldPreferDirectDebridgeRoute(quote) {
   return quote?.fromChain?.family === "EVM" &&
     quote?.toChain?.family === "EVM" &&
-    (isDirectDebridgeChain(quote?.fromChain?.id) || isDirectDebridgeChain(quote?.toChain?.id));
+    (isDebridgeDirectChain(quote?.fromChain?.id) || isDebridgeDirectChain(quote?.toChain?.id));
 }
 
 const AUTO_PROVIDERS = [
