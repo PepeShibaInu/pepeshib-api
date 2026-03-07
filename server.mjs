@@ -210,6 +210,12 @@ function shouldUseDirectDebridge(intent = {}) {
   );
 }
 
+function shouldPreferDirectDebridgeRoute(quote) {
+  return quote?.fromChain?.family === "EVM" &&
+    quote?.toChain?.family === "EVM" &&
+    (isDirectDebridgeChain(quote?.fromChain?.id) || isDirectDebridgeChain(quote?.toChain?.id));
+}
+
 const AUTO_PROVIDERS = [
   {
     key: "across",
@@ -470,6 +476,7 @@ const TOKEN_META = {
   },
   zilliqa: {
     ZIL: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDC: { address: "0xd8b73ced1b16c047048f2c5ea42233da33168198", decimals: 6 },
   },
   flow: {
     FLOW: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
@@ -514,6 +521,8 @@ const TOKEN_META = {
   },
   injective: {
     INJ: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+    USDT: { address: "0x88f7f2b685f9692caf8c478f5badf09ee9b1cc13", decimals: 6 },
+    USDC: { address: "0x2a25fbd67b3ae485e461fe55d9dbef302b7d3989", decimals: 6 },
   },
   monad: {
     MON: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
@@ -810,16 +819,19 @@ async function buildRoute(payload = {}) {
     }
   });
   const candidates = supported.length ? supported : AUTO_PROVIDERS;
+  const forcedDirectDebridge = shouldPreferDirectDebridgeRoute(quote)
+    ? candidates.find((provider) => provider.key === "debridge")
+    : null;
   const best = candidates.reduce((prev, curr) =>
     curr.estFeePct < prev.estFeePct ? curr : prev
   );
 
   const route = {
-    provider: best.label,
-    key: best.key,
-    estProviderFeePct: best.estFeePct,
-    url: best.url(quote),
-    note: best.note,
+    provider: (forcedDirectDebridge || best).label,
+    key: (forcedDirectDebridge || best).key,
+    estProviderFeePct: (forcedDirectDebridge || best).estFeePct,
+    url: (forcedDirectDebridge || best).url(quote),
+    note: (forcedDirectDebridge || best).note,
     quote,
   };
   try {
