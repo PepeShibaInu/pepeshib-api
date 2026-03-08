@@ -583,6 +583,14 @@ function getConfig(input = {}) {
   };
 }
 
+function providerSlippageMode(payload = {}) {
+  return String(payload?.slippageMode || "auto").toLowerCase() === "manual" ? "manual" : "auto";
+}
+
+function providerSlippagePercent(payload = {}) {
+  return Math.max(MIN_SLIPPAGE, asNum(payload?.slippage, 0.5));
+}
+
 async function fetchLiveMarketPrices() {
   const ids = Array.from(new Set(Object.values(MARKET_PRICE_IDS)));
   const params = new URLSearchParams({
@@ -1219,8 +1227,10 @@ async function prepareLifiSwap(intent, payload) {
     fromAmount: amountRaw,
     fromAddress,
     toAddress: String(intent.to.recipient || "").trim() || fromAddress,
-    slippage: String(Math.max(MIN_SLIPPAGE, Number(payload?.slippage || 0.5))),
   });
+  if (providerSlippageMode(payload) === "manual") {
+    params.set("slippage", String(providerSlippagePercent(payload)));
+  }
   const allowed = bridgeAllowList(intent.execution?.providerKey);
   if (allowed.length) params.set("allowBridges", allowed.join(","));
   let quote;
@@ -1300,6 +1310,9 @@ async function prepareAcrossSwap(intent, payload) {
     depositor: fromAddress,
     recipient: String(intent.to.recipient || "").trim() || fromAddress,
   });
+  if (providerSlippageMode(payload) === "manual") {
+    params.set("slippage", String(providerSlippagePercent(payload) / 100));
+  }
   const quote = await fetchJson(`${ACROSS_BASE_URL}/swap/approval?${params.toString()}`);
   const swapTx = quote?.swapTx || quote?.swapTxn || null;
   if (!swapTx?.to) throw new Error("Across did not return executable swap transaction");
@@ -1337,6 +1350,9 @@ async function prepareRelaySwap(intent, payload) {
     tradeType: "EXACT_INPUT",
     referrer: "pepeshibdex",
   };
+  if (providerSlippageMode(payload) === "manual") {
+    requestBody.slippageTolerance = Math.round(providerSlippagePercent(payload) * 100);
+  }
   const quote = await fetchJson(`${RELAY_BASE_URL}/quote`, {
     method: "POST",
     headers: relayHeaders(),
