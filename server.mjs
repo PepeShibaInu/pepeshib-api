@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = normalize(__dirname);
 const PORT = Number(process.env.PORT || 8080);
+const SERVICE_VERSION = "v2026.03.09.server.v2";
 const CHANGENOW_API_KEY = String(process.env.CHANGENOW_API_KEY || "").trim();
 const SIMPLESWAP_API_KEY = String(process.env.SIMPLESWAP_API_KEY || "").trim();
 const RELAY_API_KEY = String(process.env.RELAY_API_KEY || "").trim();
@@ -506,6 +507,12 @@ const TOKEN_META = {
   sonic: {
     S: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
   },
+  zksync: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+  },
+  linea: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+  },
   blast: {
     ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
   },
@@ -612,7 +619,8 @@ function getChain(id) {
 function getToken(id, prices = null) {
   const token = TOKENS.find((t) => t.id === id);
   if (!token) throw new Error(`Unsupported token: ${id}`);
-  const usd = prices && prices[token.id] != null ? asNum(prices[token.id], 0) : 0;
+  const liveUsd = prices && prices[token.id] != null ? asNum(prices[token.id], 0) : 0;
+  const usd = liveUsd > 0 ? liveUsd : asNum(token.usd, 0);
   return { ...token, usd };
 }
 
@@ -2006,6 +2014,7 @@ const server = createServer(async (req, res) => {
       json(res, 200, {
         ok: true,
         service: "pshibdex-local-api",
+        version: SERVICE_VERSION,
         marketPricesUpdatedAt: MARKET_PRICE_CACHE.updatedAt || null,
         marketPriceSource: MARKET_PRICE_CACHE.source,
         marketPriceProviders: MARKET_PRICE_CACHE.providers,
