@@ -763,6 +763,9 @@ async function getMarketPrices(forceRefresh = false) {
 async function computeQuote(payload = {}) {
   const config = getConfig(payload.config);
   const amountIn = Math.max(0, asNum(payload.amount, 0));
+  if (!(amountIn > 0)) {
+    throw new Error("Swap amount must be greater than 0");
+  }
   const slippagePct = Math.max(MIN_SLIPPAGE, asNum(payload.slippage, 0.5));
   const prices = await getMarketPrices(Boolean(payload.forcePriceRefresh));
 
@@ -780,6 +783,12 @@ async function computeQuote(payload = {}) {
 
   const amountAfterTaxOnly = Math.max(0, amountIn - taxAmount);
   const amountAfterFees = Math.max(0, amountIn - taxAmount - protocolAmount - bridgeAmount);
+  if (!(amountAfterTaxOnly > 0)) {
+    throw new Error("Swap amount after tax must be greater than 0");
+  }
+  if (!(amountAfterFees > 0)) {
+    throw new Error("Swap amount after fees must be greater than 0");
+  }
   if (!(fromToken.usd > 0)) {
     throw new Error(`Live price unavailable for source token ${fromToken.id}`);
   }
