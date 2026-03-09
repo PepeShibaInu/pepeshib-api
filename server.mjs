@@ -540,7 +540,7 @@ const TOKEN_META = {
     USDC: { address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
   },
   tron: {
-    TRX: { address: "0x0000000000000000000000000000000000000000", decimals: 6 },
+    TRX: { address: "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb", decimals: 6 },
   },
 };
 const BRIDGE_KEY_MAP = {
