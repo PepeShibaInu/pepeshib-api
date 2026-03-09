@@ -1150,8 +1150,16 @@ function executionCandidateKeys(intent = {}) {
     fromChain: getChain(intent?.from?.chain || ""),
     toChain: getChain(intent?.to?.chain || ""),
   };
-  const ordered = executableProvidersForQuote(pseudoQuote).map((provider) => provider.key);
+  let ordered = executableProvidersForQuote(pseudoQuote).map((provider) => provider.key);
   const selected = String(intent?.execution?.providerKey || "").toLowerCase();
+  const toChain = String(intent?.to?.chain || "").toLowerCase();
+  const toToken = String(intent?.to?.token || "").toUpperCase();
+
+  if (toChain === "tron" && toToken === "TRX") {
+    ordered = ordered.filter((key) => key !== "relay");
+    if (!ordered.includes("debridge")) ordered.unshift("debridge");
+  }
+
   if (selected && ordered.includes(selected)) {
     ordered.sort((left, right) => {
       if (left === selected) return -1;
