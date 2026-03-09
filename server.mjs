@@ -202,11 +202,17 @@ function isDebridgeDirectChain(chainId) {
 function shouldUseDirectDebridge(intent = {}) {
   const fromChain = String(intent?.from?.chain || "");
   const toChain = String(intent?.to?.chain || "");
+  const fromFamily = getChain(fromChain).family;
+  const toFamily = getChain(toChain).family;
   return (
-    getChain(fromChain).family === "EVM" &&
-    getChain(toChain).family === "EVM" &&
+    fromFamily === "EVM" &&
+    ["EVM", "TVM"].includes(toFamily) &&
     Boolean(debridgeChainId(fromChain) && debridgeChainId(toChain)) &&
-    (isDebridgeDirectChain(fromChain) || isDebridgeDirectChain(toChain))
+    (
+      isDebridgeDirectChain(fromChain) ||
+      isDebridgeDirectChain(toChain) ||
+      toChain === "tron"
+    )
   );
 }
 
@@ -230,12 +236,14 @@ const AUTO_PROVIDERS = [
     estFeePct: 0.04,
     supports: (q) =>
       q.fromChain.family === "EVM" &&
-      q.toChain.family === "EVM" &&
+      ["EVM", "TVM"].includes(q.toChain.family) &&
       q.fromChain.id !== q.toChain.id &&
       (
-        (isLifiChain(q.fromChain.id) && isLifiChain(q.toChain.id)) ||
-        isDebridgeDirectChain(q.fromChain.id) ||
-        isDebridgeDirectChain(q.toChain.id)
+        (q.toChain.family === "EVM" && isLifiChain(q.fromChain.id) && isLifiChain(q.toChain.id)) ||
+        shouldUseDirectDebridge({
+          from: { chain: q.fromChain.id },
+          to: { chain: q.toChain.id }
+        })
       ),
     url: () => "https://app.debridge.finance/",
     note: "Auto-selected deBridge route for EVM bridge flow. Verify route details in checkout.",
@@ -1089,14 +1097,14 @@ function realExecutionSupport(intent = {}) {
     };
   }
   if (providerKey === "debridge") {
-    if (fromChain.family === "EVM" && toChain.family === "EVM" && hasIntentTokenMeta(intent)) {
+    if (fromChain.family === "EVM" && ["EVM", "TVM"].includes(toChain.family) && hasIntentTokenMeta(intent)) {
       if (shouldUseDirectDebridge(intent)) {
         return {
           supported: true,
-          reason: "Direct deBridge execution is enabled for this EVM route.",
+          reason: "Direct deBridge execution is enabled for this route.",
         };
       }
-      if (isLifiChain(intent?.from?.chain) && isLifiChain(intent?.to?.chain)) {
+      if (toChain.family === "EVM" && isLifiChain(intent?.from?.chain) && isLifiChain(intent?.to?.chain)) {
         return { supported: true, reason: "" };
       }
     }
