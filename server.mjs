@@ -22,6 +22,11 @@ const CHAINS = [
   { id: "sonic", name: "Sonic", family: "EVM" },
   { id: "zksync", name: "zkSync Era", family: "EVM" },
   { id: "linea", name: "Linea", family: "EVM" },
+  { id: "blast", name: "Blast", family: "EVM" },
+  { id: "scroll", name: "Scroll", family: "EVM" },
+  { id: "mode", name: "Mode", family: "EVM" },
+  { id: "unichain", name: "Unichain", family: "EVM" },
+  { id: "world", name: "World Chain", family: "EVM" },
   { id: "neon", name: "Neon", family: "EVM" },
   { id: "gnosis", name: "Gnosis", family: "EVM" },
   { id: "zilliqa", name: "Zilliqa EVM", family: "EVM" },
@@ -43,9 +48,6 @@ const CHAINS = [
 ];
 
 const TOKENS = [
-  { id: "USDT", usd: 1 },
-  { id: "USDC", usd: 1 },
-  { id: "PEPESHIB", usd: 0.00002 },
   { id: "BNB", usd: 560 },
   { id: "ETH", usd: 3200 },
   { id: "POL", usd: 0.95 },
@@ -158,6 +160,11 @@ const DEFAULT_CFG = {
     sonic: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     zksync: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     linea: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
+    blast: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
+    scroll: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
+    mode: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
+    unichain: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
+    world: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     neon: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     gnosis: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     zilliqa: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
@@ -204,15 +211,48 @@ function shouldUseDirectDebridge(intent = {}) {
   const toChain = String(intent?.to?.chain || "");
   const fromFamily = getChain(fromChain).family;
   const toFamily = getChain(toChain).family;
+  const bothDebridgeChains = Boolean(debridgeChainId(fromChain) && debridgeChainId(toChain));
+  const isEvmToEvmOutsideLifi = fromFamily === "EVM" &&
+    toFamily === "EVM" &&
+    bothDebridgeChains &&
+    !(isLifiChain(fromChain) && isLifiChain(toChain));
   return (
     fromFamily === "EVM" &&
     ["EVM", "TVM"].includes(toFamily) &&
-    Boolean(debridgeChainId(fromChain) && debridgeChainId(toChain)) &&
+    bothDebridgeChains &&
     (
+      isEvmToEvmOutsideLifi ||
       isDebridgeDirectChain(fromChain) ||
       isDebridgeDirectChain(toChain) ||
       toChain === "tron"
     )
+  );
+}
+
+function isUnsupportedTronNativeOutput(fromChainId = "", toChainId = "", toTokenId = "") {
+  return String(toChainId).toLowerCase() === "tron" && String(toTokenId).toUpperCase() === "TRX";
+}
+
+function isDisabledTronRoute(fromChainId = "", toChainId = "") {
+  return String(fromChainId).toLowerCase() === "tron" || String(toChainId).toLowerCase() === "tron";
+}
+
+function requiresDirectDebridgeNativeOutput(fromChainId = "", toChainId = "", toTokenId = "") {
+  const toChain = String(toChainId).toLowerCase();
+  const fromChain = String(fromChainId).toLowerCase();
+  const native = Object.keys(TOKEN_META[toChain] || {}).find((tokenId) => {
+    const meta = TOKEN_META[toChain]?.[tokenId];
+    return meta?.address === "0x0000000000000000000000000000000000000000";
+  }) || "";
+  return Boolean(
+    fromChain &&
+    toChain &&
+    getChain(fromChain).family === "EVM" &&
+    getChain(toChain).family === "EVM" &&
+    debridgeChainId(fromChain) &&
+    debridgeChainId(toChain) &&
+    !isLifiChain(toChain) &&
+    String(toTokenId).toUpperCase() === String(native).toUpperCase()
   );
 }
 
@@ -235,6 +275,8 @@ const AUTO_PROVIDERS = [
     label: "deBridge",
     estFeePct: 0.04,
     supports: (q) =>
+      !isDisabledTronRoute(q.fromChain.id, q.toChain.id) &&
+      !isUnsupportedTronNativeOutput(q.fromChain.id, q.toChain.id, q.toToken.id) &&
       q.fromChain.family === "EVM" &&
       ["EVM", "TVM"].includes(q.toChain.family) &&
       q.fromChain.id !== q.toChain.id &&
@@ -266,6 +308,9 @@ const AUTO_PROVIDERS = [
     label: "Relay",
     estFeePct: 0.1,
     supports: (q) =>
+      !requiresDirectDebridgeNativeOutput(q.fromChain.id, q.toChain.id, q.toToken.id) &&
+      !isDisabledTronRoute(q.fromChain.id, q.toChain.id) &&
+      !isUnsupportedTronNativeOutput(q.fromChain.id, q.toChain.id, q.toToken.id) &&
       ["EVM", "TVM"].includes(q.fromChain.family) &&
       ["EVM", "TVM"].includes(q.toChain.family) &&
       q.fromChain.id !== q.toChain.id &&
@@ -361,6 +406,11 @@ const ACROSS_EVM_CHAIN_IDS = {
   sonic: 146,
   zksync: 324,
   linea: 59144,
+  blast: 81457,
+  scroll: 534352,
+  mode: 34443,
+  unichain: 130,
+  world: 480,
 };
 const EVM_CHAIN_IDS = {
   ...ACROSS_EVM_CHAIN_IDS,
@@ -434,91 +484,78 @@ const DEBRIDGE_DIRECT_CHAIN_KEYS = new Set(["neon", "zilliqa", "sophon", "inject
 const TOKEN_META = {
   ethereum: {
     ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDT: { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", decimals: 6 },
-    USDC: { address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6 },
   },
   bsc: {
     BNB: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDT: { address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18 },
-    USDC: { address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", decimals: 18 },
   },
   polygon: {
     POL: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDT: { address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6 },
-    USDC: { address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", decimals: 6 },
   },
   arbitrum: {
     ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDT: { address: "0xFd086bC7CD5C481DCC9C85ebe478A1C0b69FCbb9", decimals: 6 },
-    USDC: { address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals: 6 },
   },
   optimism: {
     ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDT: { address: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58", decimals: 6 },
-    USDC: { address: "0x0b2C639c533813f4Aa9D7837CaF62653d097Ff85", decimals: 6 },
   },
   base: {
     ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDT: { address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", decimals: 6 },
-    USDC: { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
   },
   avalanche: {
     AVAX: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDT: { address: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7", decimals: 6 },
-    USDC: { address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", decimals: 6 },
   },
   sonic: {
     S: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDT: { address: "0x6047828dc181963ba44974801ff68e538da5eaf9", decimals: 6 },
-    USDC: { address: "0x29219dd400f2Bf60E5a23d13Be72B486D4038894", decimals: 6 },
+  },
+  blast: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+  },
+  scroll: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+  },
+  mode: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+  },
+  unichain: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+  },
+  world: {
+    ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
   },
   neon: {
     NEON: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDC: { address: "0xEA6B04272f9f62F997F666F07D3a974134f7FFb9", decimals: 6 },
-    USDT: { address: "0x5f0155d08eF4aaE2B500AefB64A3419dA8bB611a", decimals: 6 },
   },
   gnosis: {
     XDAI: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDC: { address: "0x2a22f9c3b484c3629090feed35f17ff8f88f76f0", decimals: 6 },
   },
   zilliqa: {
     ZIL: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDC: { address: "0xd8b73ced1b16c047048f2c5ea42233da33168198", decimals: 6 },
   },
   flow: {
     FLOW: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDC: { address: "0xf1815bd50389c46847f0bda824ec8da914045d14", decimals: 6 },
   },
   story: {
     IP: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDC: { address: "0xf1815bd50389c46847f0bda824ec8da914045d14", decimals: 6 },
   },
   abstract: {
     ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDC: { address: "0x84a71ccd554cc1b02749b35d22f684cc8ec987e1", decimals: 6 },
   },
   cronos: {
     CRO: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDC: { address: "0xc21223249ca28397b4b6541dffaecc539bff0c59", decimals: 6 },
   },
   berachain: {
     BERA: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDC: { address: "0x549943e04f40284185054145c6e4e9568c1d3241", decimals: 6 },
   },
   bob: {
     ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
   },
   hyperevm: {
     HYPE: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDC: { address: "0xb88339cb7199b77e23db6e890353e22632ba630f", decimals: 6 },
   },
   mantle: {
     MNT: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDC: { address: "0x09bc4e0d864854c6afb6eb9a9cdf58ac190d0df9", decimals: 6 },
   },
   sophon: {
     SOPH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDC: { address: "0x9Aa0F72392B5784Ad86c6f3E899bCc053D00Db4F", decimals: 6 },
   },
   sei: {
     SEI: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
@@ -528,16 +565,12 @@ const TOKEN_META = {
   },
   injective: {
     INJ: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDT: { address: "0x88f7f2b685f9692caf8c478f5badf09ee9b1cc13", decimals: 6 },
-    USDC: { address: "0x2a25fbd67b3ae485e461fe55d9dbef302b7d3989", decimals: 6 },
   },
   monad: {
     MON: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-    USDC: { address: "0x754704bc059f8c67012fed69bc8a327a5aafb603", decimals: 6 },
   },
   solana: {
     SOL: { address: "11111111111111111111111111111111", decimals: 9 },
-    USDC: { address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
   },
   tron: {
     TRX: { address: "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb", decimals: 6 },
@@ -577,9 +610,20 @@ function getChain(id) {
 }
 
 function getToken(id, prices = null) {
-  const token = TOKENS.find((t) => t.id === id) || TOKENS[0];
+  const token = TOKENS.find((t) => t.id === id);
+  if (!token) throw new Error(`Unsupported token: ${id}`);
   const usd = prices && prices[token.id] != null ? asNum(prices[token.id], 0) : 0;
   return { ...token, usd };
+}
+
+function isNativeTokenForChain(chainId, tokenId) {
+  const chain = getChain(chainId);
+  if (chain.family === "EVM") {
+    return TOKEN_META[chainId]?.[tokenId]?.address === "0x0000000000000000000000000000000000000000";
+  }
+  if (chain.id === "solana") return tokenId === "SOL";
+  if (chain.id === "tron") return tokenId === "TRX";
+  return false;
 }
 
 function getConfig(input = {}) {
@@ -781,6 +825,12 @@ async function computeQuote(payload = {}) {
   const toToken = getToken(payload.toToken, prices);
   const fromChain = getChain(payload.fromChain);
   const toChain = getChain(payload.toChain);
+  if (!isNativeTokenForChain(fromChain.id, fromToken.id)) {
+    throw new Error(`Source token ${fromToken.id} is not supported. PepeShibDex is currently native-token only.`);
+  }
+  if (!isNativeTokenForChain(toChain.id, toToken.id)) {
+    throw new Error(`Destination token ${toToken.id} is not supported. PepeShibDex is currently native-token only.`);
+  }
 
   const crossFamilyPenalty = fromChain.family === toChain.family ? 0 : 0.05;
   const sameChainDiscount = fromChain.id === toChain.id ? 0.04 : 0;
@@ -1060,6 +1110,12 @@ function realExecutionSupport(intent = {}) {
   const fromChain = getChain(intent?.from?.chain || "");
   const toChain = getChain(intent?.to?.chain || "");
   const providerKey = String(intent?.execution?.providerKey || "").toLowerCase();
+  if (isDisabledTronRoute(intent?.from?.chain, intent?.to?.chain)) {
+    return {
+      supported: false,
+      reason: "Tron routes are disabled in the current PepeShibDex product configuration.",
+    };
+  }
   if (!providerKey) {
     return {
       supported: false,
@@ -1082,6 +1138,12 @@ function realExecutionSupport(intent = {}) {
     };
   }
   if (providerKey === "relay") {
+    if (isUnsupportedTronNativeOutput(intent?.from?.chain, intent?.to?.chain, intent?.to?.token)) {
+      return {
+        supported: false,
+        reason: "Tron native TRX output is not supported by the real provider routes currently wired in the backend. Use a Tron stablecoin route instead.",
+      };
+    }
     if (isRelayChain(intent?.from?.chain) && isRelayChain(intent?.to?.chain) && hasIntentTokenMeta(intent)) {
       if (fromChain.family === "TVM") {
         return {
@@ -1097,6 +1159,12 @@ function realExecutionSupport(intent = {}) {
     };
   }
   if (providerKey === "debridge") {
+    if (isUnsupportedTronNativeOutput(intent?.from?.chain, intent?.to?.chain, intent?.to?.token)) {
+      return {
+        supported: false,
+        reason: "Tron native TRX output is not supported by the real provider routes currently wired in the backend. Use a Tron stablecoin route instead.",
+      };
+    }
     if (fromChain.family === "EVM" && ["EVM", "TVM"].includes(toChain.family) && hasIntentTokenMeta(intent)) {
       if (shouldUseDirectDebridge(intent)) {
         return {
@@ -1142,7 +1210,11 @@ function executableProvidersForQuote(quote) {
   });
   return supported
     .filter((provider) => EXECUTABLE_AUTO_PROVIDER_KEYS.has(provider.key))
-    .sort((left, right) => left.estFeePct - right.estFeePct);
+    .sort((left, right) => {
+      if (left.key === "debridge" && right.key !== "debridge") return 1;
+      if (right.key === "debridge" && left.key !== "debridge") return -1;
+      return left.estFeePct - right.estFeePct;
+    });
 }
 
 function executionCandidateKeys(intent = {}) {
@@ -1157,10 +1229,10 @@ function executionCandidateKeys(intent = {}) {
 
   if (toChain === "tron" && toToken === "TRX") {
     ordered = ordered.filter((key) => key !== "relay");
-    if (!ordered.includes("debridge")) ordered.unshift("debridge");
+    if (!ordered.includes("debridge")) ordered.push("debridge");
   }
 
-  if (selected && ordered.includes(selected)) {
+  if (selected && selected !== "debridge" && ordered.includes(selected)) {
     ordered.sort((left, right) => {
       if (left === selected) return -1;
       if (right === selected) return 1;
