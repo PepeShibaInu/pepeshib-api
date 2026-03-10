@@ -28,11 +28,9 @@ const CHAINS = [
   { id: "mode", name: "Mode", family: "EVM" },
   { id: "unichain", name: "Unichain", family: "EVM" },
   { id: "world", name: "World Chain", family: "EVM" },
-  { id: "neon", name: "Neon", family: "EVM" },
   { id: "gnosis", name: "Gnosis", family: "EVM" },
   { id: "zilliqa", name: "Zilliqa EVM", family: "EVM" },
   { id: "flow", name: "Flow EVM", family: "EVM" },
-  { id: "story", name: "Story", family: "EVM" },
   { id: "abstract", name: "Abstract", family: "EVM" },
   { id: "cronos", name: "Cronos", family: "EVM" },
   { id: "berachain", name: "Berachain", family: "EVM" },
@@ -42,7 +40,6 @@ const CHAINS = [
   { id: "sophon", name: "Sophon", family: "EVM" },
   { id: "sei", name: "Sei", family: "EVM" },
   { id: "plasma", name: "Plasma", family: "EVM" },
-  { id: "injective", name: "Injective EVM", family: "EVM" },
   { id: "monad", name: "Monad", family: "EVM" },
   { id: "solana", name: "Solana", family: "SVM" },
   { id: "tron", name: "Tron", family: "TVM" },
@@ -54,11 +51,9 @@ const TOKENS = [
   { id: "POL", usd: 0.95 },
   { id: "AVAX", usd: 42 },
   { id: "S", usd: 0.05 },
-  { id: "NEON", usd: 0.4 },
   { id: "XDAI", usd: 1 },
   { id: "ZIL", usd: 0.03 },
   { id: "FLOW", usd: 0.8 },
-  { id: "IP", usd: 3 },
   { id: "CRO", usd: 0.15 },
   { id: "BERA", usd: 8 },
   { id: "HYPE", usd: 20 },
@@ -66,7 +61,6 @@ const TOKENS = [
   { id: "SOPH", usd: 0.1 },
   { id: "SEI", usd: 0.5 },
   { id: "XPL", usd: 0.1 },
-  { id: "INJ", usd: 25 },
   { id: "MON", usd: 1 },
   { id: "SOL", usd: 140 },
   { id: "TRX", usd: 0.13 },
@@ -79,10 +73,8 @@ const MARKET_PRICE_IDS = {
   POL: "polygon-ecosystem-token",
   AVAX: "avalanche-2",
   S: "sonic-3",
-  NEON: "neon-evm",
   ZIL: "zilliqa",
   FLOW: "flow",
-  IP: "story-2",
   CRO: "crypto-com-chain",
   BERA: "berachain-bera",
   HYPE: "hyperliquid",
@@ -90,7 +82,6 @@ const MARKET_PRICE_IDS = {
   SOPH: "sophon",
   SEI: "sei-network",
   XPL: "plasma",
-  INJ: "injective-protocol",
   MON: "monad",
   SOL: "solana",
   TRX: "tron",
@@ -166,11 +157,9 @@ const DEFAULT_CFG = {
     mode: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     unichain: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     world: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
-    neon: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     gnosis: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     zilliqa: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     flow: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
-    story: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     abstract: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     cronos: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     berachain: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
@@ -180,7 +169,6 @@ const DEFAULT_CFG = {
     sophon: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     sei: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     plasma: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
-    injective: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     monad: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     solana: "DaQ6hn3FUunch65aCy747fQviJynoPEz7Dsdu79sgxRe",
     tron: "TXrA6LPuPwU5Ntid6Tpzdvtv5C35v3UQgo",
@@ -415,7 +403,6 @@ const ACROSS_EVM_CHAIN_IDS = {
 };
 const EVM_CHAIN_IDS = {
   ...ACROSS_EVM_CHAIN_IDS,
-  neon: 245022934,
   gnosis: 100,
   zilliqa: 32769,
   flow: 747,
@@ -429,7 +416,6 @@ const EVM_CHAIN_IDS = {
   sophon: 50104,
   sei: 1329,
   plasma: 9745,
-  injective: 1776,
   monad: 143,
 };
 const LI_FI_CHAIN_IDS = {
@@ -452,7 +438,6 @@ const RELAY_CHAIN_IDS = {
   ...ACROSS_EVM_CHAIN_IDS,
   gnosis: 100,
   flow: 747,
-  story: 1514,
   abstract: 2741,
   cronos: 25,
   berachain: 80094,
@@ -475,11 +460,9 @@ const DEBRIDGE_CHAIN_IDS = {
   avalanche: 43114,
   linea: 59144,
   sonic: 100000014,
-  neon: 100000001,
   gnosis: 100000002,
   zilliqa: 100000008,
   flow: 100000009,
-  story: 100000013,
   abstract: 100000017,
   cronos: 100000019,
   berachain: 100000020,
@@ -489,14 +472,13 @@ const DEBRIDGE_CHAIN_IDS = {
   sophon: 100000025,
   sei: 100000027,
   plasma: 100000028,
-  injective: 100000029,
   monad: 100000030,
   tron: 100000026,
 };
 const DEBRIDGE_DIRECT_CHAIN_KEYS = new Set([
-  "neon", "zilliqa", "flow", "story", "abstract", "cronos",
+  "zilliqa", "flow", "abstract", "cronos",
   "berachain", "bob", "hyperevm", "mantle", "sophon", "sei",
-  "plasma", "injective", "monad", "gnosis", "sonic",
+  "plasma", "monad", "gnosis", "sonic",
 ]);
 const TOKEN_META = {
   ethereum: {
@@ -544,9 +526,6 @@ const TOKEN_META = {
   world: {
     ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
   },
-  neon: {
-    NEON: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-  },
   gnosis: {
     XDAI: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
   },
@@ -555,9 +534,6 @@ const TOKEN_META = {
   },
   flow: {
     FLOW: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-  },
-  story: {
-    IP: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
   },
   abstract: {
     ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
@@ -585,9 +561,6 @@ const TOKEN_META = {
   },
   plasma: {
     XPL: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-  },
-  injective: {
-    INJ: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
   },
   monad: {
     MON: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
