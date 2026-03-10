@@ -1314,7 +1314,7 @@ function sourceAddressOrEmpty(payload) {
 }
 
 async function fetchJson(url, options = {}) {
-  const timeoutMs = options.timeoutMs || 15000;
+  const timeoutMs = options.timeoutMs || 20000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -1340,11 +1340,11 @@ function setCachedJson(map, key, data) {
   map.set(key, { at: Date.now(), data: structuredClone(data) });
 }
 
-async function fetchJsonCached(url, ttlMs, cacheMap) {
+async function fetchJsonCached(url, ttlMs, cacheMap, fetchOpts = {}) {
   const fresh = getCachedJson(cacheMap, url, ttlMs);
   if (fresh) return fresh;
   try {
-    const data = await fetchJson(url);
+    const data = await fetchJson(url, fetchOpts);
     setCachedJson(cacheMap, url, data);
     return structuredClone(data);
   } catch (err) {
@@ -1464,7 +1464,7 @@ async function prepareAcrossSwap(intent, payload) {
   if (providerSlippageMode(payload) === "manual") {
     params.set("slippage", String(providerSlippagePercent(payload) / 100));
   }
-  const quote = await fetchJson(`${ACROSS_BASE_URL}/swap/approval?${params.toString()}`);
+  const quote = await fetchJson(`${ACROSS_BASE_URL}/swap/approval?${params.toString()}`, { timeoutMs: 45000 });
   const swapTx = quote?.swapTx || quote?.swapTxn || null;
   if (!swapTx?.to) throw new Error("Across did not return executable swap transaction");
   return {
@@ -1508,6 +1508,7 @@ async function prepareRelaySwap(intent, payload) {
     method: "POST",
     headers: relayHeaders(),
     body: JSON.stringify(requestBody),
+    timeoutMs: 45000,
   });
   const selected = pickRelayExecutionStep(quote?.steps);
   const tx = selected?.item?.data || null;
@@ -1623,7 +1624,8 @@ async function prepareDebridgeSwap(intent, payload) {
   const quote = await fetchJsonCached(
     `${DEBRIDGE_BASE_URL}/v1.0/dln/order/create-tx?${params.toString()}`,
     LI_FI_QUOTE_CACHE_TTL_MS,
-    DEBRIDGE_QUOTE_CACHE
+    DEBRIDGE_QUOTE_CACHE,
+    { timeoutMs: 45000 }
   );
   const tx = quote?.tx;
   if (!tx?.to) throw new Error("deBridge create-tx did not return executable transaction");
