@@ -1314,7 +1314,7 @@ function sourceAddressOrEmpty(payload) {
 }
 
 async function fetchJson(url, options = {}) {
-  const timeoutMs = options.timeoutMs || 6000;
+  const timeoutMs = options.timeoutMs || 15000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
