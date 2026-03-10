@@ -898,6 +898,7 @@ async function computeQuote(payload = {}) {
 }
 
 async function buildRoute(payload = {}) {
+  const routeDeadline = Date.now() + 11000;
   const quote = await computeQuote(payload);
   const candidates = executableProvidersForQuote(quote);
   if (!candidates.length) {
@@ -914,17 +915,21 @@ async function buildRoute(payload = {}) {
     quote,
   });
 
-  const previewWithTimeout = (route, pl, ms = 6000) =>
-    Promise.race([
+  const previewWithTimeout = (route, pl) => {
+    const remaining = Math.max(routeDeadline - Date.now(), 500);
+    const ms = Math.min(remaining, 5000);
+    return Promise.race([
       buildLiveRoutePreview(route, pl),
       new Promise((_, reject) => setTimeout(() => reject(new Error("Live route preview timeout")), ms)),
     ]);
+  };
 
   let selectedRoute = baseRouteFor(orderedCandidates[0]);
   let lastPreviewError = null;
 
   if (sourceAddressOrEmpty(payload)) {
     for (const provider of orderedCandidates) {
+      if (Date.now() >= routeDeadline) break;
       const candidateRoute = baseRouteFor(provider);
       try {
         candidateRoute.live = await previewWithTimeout(candidateRoute, payload);
@@ -944,11 +949,15 @@ async function buildRoute(payload = {}) {
     }
   }
 
-  try {
-    selectedRoute.live = await previewWithTimeout(selectedRoute, payload);
-  } catch (err) {
+  if (Date.now() < routeDeadline) {
+    try {
+      selectedRoute.live = await previewWithTimeout(selectedRoute, payload);
+    } catch (err) {
+      selectedRoute.live = null;
+      lastPreviewError = lastPreviewError || err;
+    }
+  } else {
     selectedRoute.live = null;
-    lastPreviewError = lastPreviewError || err;
   }
   if (lastPreviewError && !selectedRoute.live) {
     selectedRoute.note = `${selectedRoute.note} Auto Route will retry compatible providers during execution if this provider cannot execute the pair.`;
@@ -1287,7 +1296,7 @@ function sourceAddressOrEmpty(payload) {
 }
 
 async function fetchJson(url, options = {}) {
-  const timeoutMs = options.timeoutMs || 8000;
+  const timeoutMs = options.timeoutMs || 6000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
