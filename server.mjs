@@ -770,20 +770,26 @@ async function fetchAggregatedMarketPrices() {
   const prices = {};
   const activeProviders = [];
 
-  for (const provider of providerFetchers) {
-    try {
-      const next = await provider.fetcher();
+  const results = await Promise.allSettled(
+    providerFetchers.map(async (provider) => {
+      const data = await provider.fetcher();
+      return { key: provider.key, data };
+    })
+  );
+
+  for (const result of results) {
+    if (result.status === "fulfilled") {
       let merged = false;
-      Object.entries(next || {}).forEach(([symbol, usd]) => {
+      Object.entries(result.value.data || {}).forEach(([symbol, usd]) => {
         const value = asNum(usd, 0);
         if (value > 0) {
           prices[symbol] = value;
           merged = true;
         }
       });
-      if (merged) activeProviders.push(provider.key);
-    } catch (err) {
-      console.warn(`[PepeShibDex] Market price provider failed: ${provider.key}: ${err?.message || err}`);
+      if (merged) activeProviders.push(result.value.key);
+    } else {
+      console.warn(`[PepeShibDex] Market price provider failed: ${result.reason?.message || result.reason}`);
     }
   }
 
@@ -908,6 +914,12 @@ async function buildRoute(payload = {}) {
     quote,
   });
 
+  const previewWithTimeout = (route, pl, ms = 6000) =>
+    Promise.race([
+      buildLiveRoutePreview(route, pl),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Live route preview timeout")), ms)),
+    ]);
+
   let selectedRoute = baseRouteFor(orderedCandidates[0]);
   let lastPreviewError = null;
 
@@ -915,7 +927,7 @@ async function buildRoute(payload = {}) {
     for (const provider of orderedCandidates) {
       const candidateRoute = baseRouteFor(provider);
       try {
-        candidateRoute.live = await buildLiveRoutePreview(candidateRoute, payload);
+        candidateRoute.live = await previewWithTimeout(candidateRoute, payload);
         selectedRoute = candidateRoute;
         return selectedRoute;
       } catch (err) {
@@ -933,7 +945,7 @@ async function buildRoute(payload = {}) {
   }
 
   try {
-    selectedRoute.live = await buildLiveRoutePreview(selectedRoute, payload);
+    selectedRoute.live = await previewWithTimeout(selectedRoute, payload);
   } catch (err) {
     selectedRoute.live = null;
     lastPreviewError = lastPreviewError || err;
@@ -1275,12 +1287,19 @@ function sourceAddressOrEmpty(payload) {
 }
 
 async function fetchJson(url, options = {}) {
-  const res = await fetch(url, options);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`${url} failed: ${res.status}${text ? ` ${text.slice(0, 220)}` : ""}`);
+  const timeoutMs = options.timeoutMs || 8000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: options.signal || controller.signal });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`${url} failed: ${res.status}${text ? ` ${text.slice(0, 220)}` : ""}`);
+    }
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
   }
-  return await res.json();
 }
 
 function getCachedJson(map, key, ttlMs) {
