@@ -434,6 +434,22 @@ const EVM_CHAIN_IDS = {
 };
 const LI_FI_CHAIN_IDS = {
   ...ACROSS_EVM_CHAIN_IDS,
+  neon: 245022934,
+  gnosis: 100,
+  zilliqa: 32769,
+  flow: 747,
+  story: 1514,
+  abstract: 2741,
+  cronos: 25,
+  berachain: 80094,
+  bob: 60808,
+  hyperevm: 999,
+  mantle: 5000,
+  sophon: 50104,
+  sei: 1329,
+  plasma: 9745,
+  injective: 1776,
+  monad: 143,
   solana: 1151111081099710,
 };
 const RELAY_CHAIN_IDS = {
@@ -485,7 +501,7 @@ const DEBRIDGE_CHAIN_IDS = {
   monad: 143,
   tron: 100000026,
 };
-const DEBRIDGE_DIRECT_CHAIN_KEYS = new Set(["neon", "zilliqa", "sophon", "injective"]);
+const DEBRIDGE_DIRECT_CHAIN_KEYS = new Set([]);
 const TOKEN_META = {
   ethereum: {
     ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
