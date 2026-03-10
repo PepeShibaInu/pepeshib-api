@@ -29,7 +29,6 @@ const CHAINS = [
   { id: "unichain", name: "Unichain", family: "EVM" },
   { id: "world", name: "World Chain", family: "EVM" },
   { id: "gnosis", name: "Gnosis", family: "EVM" },
-  { id: "zilliqa", name: "Zilliqa EVM", family: "EVM" },
   { id: "flow", name: "Flow EVM", family: "EVM" },
   { id: "abstract", name: "Abstract", family: "EVM" },
   { id: "cronos", name: "Cronos", family: "EVM" },
@@ -52,7 +51,6 @@ const TOKENS = [
   { id: "AVAX", usd: 42 },
   { id: "S", usd: 0.05 },
   { id: "XDAI", usd: 1 },
-  { id: "ZIL", usd: 0.03 },
   { id: "FLOW", usd: 0.8 },
   { id: "CRO", usd: 0.15 },
   { id: "BERA", usd: 8 },
@@ -73,7 +71,6 @@ const MARKET_PRICE_IDS = {
   POL: "polygon-ecosystem-token",
   AVAX: "avalanche-2",
   S: "sonic-3",
-  ZIL: "zilliqa",
   FLOW: "flow",
   CRO: "crypto-com-chain",
   BERA: "berachain-bera",
@@ -158,7 +155,6 @@ const DEFAULT_CFG = {
     unichain: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     world: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     gnosis: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
-    zilliqa: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     flow: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     abstract: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
     cronos: "0x2F455Df5188595CFaC96DA82dd31F3E73b6F2e09",
@@ -404,9 +400,7 @@ const ACROSS_EVM_CHAIN_IDS = {
 const EVM_CHAIN_IDS = {
   ...ACROSS_EVM_CHAIN_IDS,
   gnosis: 100,
-  zilliqa: 32769,
   flow: 747,
-  story: 1514,
   abstract: 2741,
   cronos: 25,
   berachain: 80094,
@@ -461,7 +455,6 @@ const DEBRIDGE_CHAIN_IDS = {
   linea: 59144,
   sonic: 100000014,
   gnosis: 100000002,
-  zilliqa: 100000008,
   flow: 100000009,
   abstract: 100000017,
   cronos: 100000019,
@@ -476,7 +469,7 @@ const DEBRIDGE_CHAIN_IDS = {
   tron: 100000026,
 };
 const DEBRIDGE_DIRECT_CHAIN_KEYS = new Set([
-  "zilliqa", "flow", "abstract", "cronos",
+  "flow", "abstract", "cronos",
   "berachain", "bob", "hyperevm", "mantle", "sophon", "sei",
   "plasma", "monad", "gnosis", "sonic",
 ]);
@@ -528,9 +521,6 @@ const TOKEN_META = {
   },
   gnosis: {
     XDAI: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
-  },
-  zilliqa: {
-    ZIL: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
   },
   flow: {
     FLOW: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
