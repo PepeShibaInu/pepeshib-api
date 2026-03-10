@@ -434,11 +434,8 @@ const EVM_CHAIN_IDS = {
 };
 const LI_FI_CHAIN_IDS = {
   ...ACROSS_EVM_CHAIN_IDS,
-  neon: 245022934,
   gnosis: 100,
-  zilliqa: 32769,
   flow: 747,
-  story: 1514,
   abstract: 2741,
   cronos: 25,
   berachain: 80094,
@@ -448,15 +445,12 @@ const LI_FI_CHAIN_IDS = {
   sophon: 50104,
   sei: 1329,
   plasma: 9745,
-  injective: 1776,
   monad: 143,
   solana: 1151111081099710,
 };
 const RELAY_CHAIN_IDS = {
   ...ACROSS_EVM_CHAIN_IDS,
-  neon: 245022934,
   gnosis: 100,
-  zilliqa: 32769,
   flow: 747,
   story: 1514,
   abstract: 2741,
@@ -465,10 +459,8 @@ const RELAY_CHAIN_IDS = {
   bob: 60808,
   hyperevm: 999,
   mantle: 5000,
-  sophon: 50104,
   sei: 1329,
   plasma: 9745,
-  injective: 1776,
   monad: 143,
   solana: 792703809,
   tron: 728126428,
@@ -482,26 +474,30 @@ const DEBRIDGE_CHAIN_IDS = {
   base: 8453,
   avalanche: 43114,
   linea: 59144,
-  sonic: 146,
-  neon: 245022934,
-  gnosis: 100,
-  zilliqa: 32769,
-  flow: 747,
-  story: 1514,
-  abstract: 2741,
-  cronos: 25,
-  berachain: 80094,
-  bob: 60808,
-  hyperevm: 999,
-  mantle: 5000,
-  sophon: 50104,
-  sei: 1329,
-  plasma: 9745,
-  injective: 1776,
-  monad: 143,
+  sonic: 100000014,
+  neon: 100000001,
+  gnosis: 100000002,
+  zilliqa: 100000008,
+  flow: 100000009,
+  story: 100000013,
+  abstract: 100000017,
+  cronos: 100000019,
+  berachain: 100000020,
+  bob: 100000021,
+  hyperevm: 100000022,
+  mantle: 100000023,
+  sophon: 100000025,
+  sei: 100000027,
+  plasma: 100000028,
+  injective: 100000029,
+  monad: 100000030,
   tron: 100000026,
 };
-const DEBRIDGE_DIRECT_CHAIN_KEYS = new Set([]);
+const DEBRIDGE_DIRECT_CHAIN_KEYS = new Set([
+  "neon", "zilliqa", "flow", "story", "abstract", "cronos",
+  "berachain", "bob", "hyperevm", "mantle", "sophon", "sei",
+  "plasma", "injective", "monad", "gnosis", "sonic",
+]);
 const TOKEN_META = {
   ethereum: {
     ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18 },
@@ -1270,6 +1266,8 @@ function executionCandidateKeys(intent = {}) {
   const pseudoQuote = {
     fromChain: getChain(intent?.from?.chain || ""),
     toChain: getChain(intent?.to?.chain || ""),
+    fromToken: { id: intent?.from?.token || "" },
+    toToken: { id: intent?.to?.token || "" },
   };
   let ordered = executableProvidersForQuote(pseudoQuote).map((provider) => provider.key);
   const selected = String(intent?.execution?.providerKey || "").toLowerCase();
